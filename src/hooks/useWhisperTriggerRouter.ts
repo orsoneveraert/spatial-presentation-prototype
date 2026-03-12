@@ -62,6 +62,11 @@ type AudioContextWindow = Window &
     webkitAudioContext?: typeof AudioContext
   }
 
+const TARGET_SAMPLE_RATE = 16000
+const MIN_ANALYSIS_MS = 1000
+const SILENCE_CHECK_MS = 1200
+const SILENCE_RMS_THRESHOLD = 0.008
+
 function getAudioContextConstructor() {
   if (typeof window === 'undefined') {
     return null
@@ -115,6 +120,53 @@ function encodeWav(samples: Float32Array, sampleRate: number) {
   floatTo16BitPcm(view, 44, samples)
 
   return new Blob([buffer], { type: 'audio/wav' })
+}
+
+function downsampleSamples(
+  input: Float32Array,
+  sourceSampleRate: number,
+  targetSampleRate: number,
+) {
+  if (!input.length || sourceSampleRate <= targetSampleRate) {
+    return input
+  }
+
+  const ratio = sourceSampleRate / targetSampleRate
+  const targetLength = Math.max(1, Math.round(input.length / ratio))
+  const output = new Float32Array(targetLength)
+  let outputIndex = 0
+  let sourceIndex = 0
+
+  while (outputIndex < targetLength) {
+    const nextSourceIndex = Math.min(input.length, Math.round((outputIndex + 1) * ratio))
+    let sum = 0
+    let count = 0
+
+    for (let index = sourceIndex; index < nextSourceIndex; index += 1) {
+      sum += input[index]
+      count += 1
+    }
+
+    output[outputIndex] = count > 0 ? sum / count : input[Math.min(sourceIndex, input.length - 1)]
+    outputIndex += 1
+    sourceIndex = nextSourceIndex
+  }
+
+  return output
+}
+
+function computeRms(samples: Float32Array) {
+  if (!samples.length) {
+    return 0
+  }
+
+  let total = 0
+
+  for (let index = 0; index < samples.length; index += 1) {
+    total += samples[index] * samples[index]
+  }
+
+  return Math.sqrt(total / samples.length)
 }
 
 function collectLatestSamples(chunks: Float32Array[], desiredSamples: number) {
@@ -271,7 +323,7 @@ async function pingService() {
 
 export function useWhisperTriggerRouter({
   armingWords,
-  chunkMs = 2500,
+  chunkMs = 1800,
   nodes,
   onMatch,
   windowMs = 10000,
@@ -402,7 +454,7 @@ export function useWhisperTriggerRouter({
       bufferedSamplesRef.current,
       Math.ceil(sampleRate * windowMs / 1000),
     )
-    const minimumSamples = Math.ceil(sampleRate * 1.5)
+    const minimumSamples = Math.ceil(sampleRate * MIN_ANALYSIS_MS / 1000)
 
     if (desiredSamples < minimumSamples) {
       return
@@ -411,10 +463,28 @@ export function useWhisperTriggerRouter({
     analysisInFlightRef.current = true
     pendingAnalysisRef.current = false
 
-    const wavBlob = encodeWav(
-      collectLatestSamples(audioChunksRef.current, desiredSamples),
-      sampleRate,
+    const windowSamples = collectLatestSamples(audioChunksRef.current, desiredSamples)
+    const silenceCheckSamples = collectLatestSamples(
+      audioChunksRef.current,
+      Math.min(desiredSamples, Math.ceil(sampleRate * SILENCE_CHECK_MS / 1000)),
     )
+
+    if (computeRms(silenceCheckSamples) < SILENCE_RMS_THRESHOLD) {
+      setTranscript('')
+      setWindowTranscript('')
+      setTriggerState('idle')
+      analysisInFlightRef.current = false
+
+      if (pendingAnalysisRef.current && isRunningRef.current) {
+        pendingAnalysisRef.current = false
+      }
+
+      return
+    }
+
+    const wavSampleRate = Math.min(sampleRate, TARGET_SAMPLE_RATE)
+    const wavSamples = downsampleSamples(windowSamples, sampleRate, wavSampleRate)
+    const wavBlob = encodeWav(wavSamples, wavSampleRate)
 
     const formData = new FormData()
     formData.append('file', wavBlob, 'window.wav')
@@ -542,12 +612,15 @@ export function useWhisperTriggerRouter({
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
+          sampleRate: TARGET_SAMPLE_RATE,
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
         },
       })
-      const audioContext = new AudioContextConstructor()
+      const audioContext = new AudioContextConstructor({
+        latencyHint: 'interactive',
+      })
 
       if (audioContext.state === 'suspended') {
         await audioContext.resume()
