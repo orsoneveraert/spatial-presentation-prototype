@@ -211,6 +211,53 @@ export function PresentationStage({
     latestViewKeyRef.current = viewKey
   }, [camera, viewKey, viewport])
 
+  useEffect(() => {
+    const focusSources = nodes
+      .map((node) => node.focusSource)
+      .filter((focusSource): focusSource is string => Boolean(focusSource))
+
+    if (focusSources.length === 0) {
+      return
+    }
+
+    let cancelled = false
+    let preloadIndex = 0
+    let timerId: number | null = null
+
+    const preloadNext = () => {
+      if (cancelled || preloadIndex >= focusSources.length) {
+        return
+      }
+
+      const image = new Image()
+      image.decoding = 'async'
+      image.loading = 'eager'
+      image.src = focusSources[preloadIndex]!
+      preloadIndex += 1
+
+      const scheduleNext = () => {
+        if (cancelled || preloadIndex >= focusSources.length) {
+          return
+        }
+
+        timerId = window.setTimeout(preloadNext, 120)
+      }
+
+      image.onload = scheduleNext
+      image.onerror = scheduleNext
+    }
+
+    timerId = window.setTimeout(preloadNext, 360)
+
+    return () => {
+      cancelled = true
+
+      if (timerId !== null) {
+        window.clearTimeout(timerId)
+      }
+    }
+  }, [nodes])
+
   useEffect(
     () => () => {
       stopInertia()
@@ -513,7 +560,7 @@ export function PresentationStage({
                     <img
                       alt=""
                       className="frame__media"
-                      decoding="async"
+                      decoding={isActive ? 'sync' : 'async'}
                       draggable={false}
                       fetchPriority={isActive ? 'high' : 'low'}
                       loading={isActive ? 'eager' : 'lazy'}

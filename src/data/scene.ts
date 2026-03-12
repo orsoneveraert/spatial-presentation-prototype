@@ -159,7 +159,7 @@ const offsetPresetsByCount: Record<number, number[]> = {
 function pageSources(pageNumber: string) {
   return {
     source: assetUrl(`media/psychodesign-remise/page-${pageNumber}.png`),
-    focusSource: assetUrl(`media/psychodesign-remise-hd/page-${pageNumber}.png`),
+    focusSource: assetUrl(`media/psychodesign-remise-focus/page-${pageNumber}.png`),
   }
 }
 
