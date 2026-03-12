@@ -1,4 +1,4 @@
-import { Fragment, startTransition, useDeferredValue, useEffect, useEffectEvent, useMemo, useRef, useState, type FormEvent } from 'react'
+import { Fragment, startTransition, useCallback, useDeferredValue, useEffect, useEffectEvent, useMemo, useRef, useState, type FormEvent } from 'react'
 import './App.css'
 import { PresentationStage } from './components/PresentationStage'
 import {
@@ -171,12 +171,18 @@ function renderHighlightedTranscript(entry: TranscriptHistoryEntry) {
 }
 
 function App() {
+  const appShellRef = useRef<HTMLDivElement | null>(null)
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null)
   const [manualCommand, setManualCommand] = useState('')
   const [lastIntent, setLastIntent] = useState('Dites une forme de "aller", "regarder" ou "page", puis un seul mot comme "couverture", "sommaire", "pomodoro" ou "page 18".')
   const [isPanelOpen, setIsPanelOpen] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(() =>
+    typeof document !== 'undefined' ? document.fullscreenElement === document.documentElement : false,
+  )
   const lastDirectCommandRef = useRef<{ signature: string; timestamp: number } | null>(null)
   const voiceTargets = useMemo(() => [...presentationNodes, ...voiceCommandTargets], [])
+  const isFullscreenSupported =
+    typeof document !== 'undefined' && typeof document.documentElement.requestFullscreen === 'function'
 
   const commitSelection = (nextNodeId: string | null, reason: string) => {
     startTransition(() => {
@@ -401,6 +407,71 @@ function App() {
     }
   })
 
+  const toggleFullscreen = useCallback(async () => {
+    const appShellElement = appShellRef.current
+
+    if (!appShellElement || !isFullscreenSupported) {
+      setLastIntent('Le plein ecran n est pas disponible dans ce navigateur.')
+      return
+    }
+
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen()
+        setLastIntent('Sortie du plein ecran.')
+        return
+      }
+
+      try {
+        await appShellElement.requestFullscreen({ navigationUI: 'hide' })
+      } catch {
+        await appShellElement.requestFullscreen()
+      }
+
+      setLastIntent('Plein ecran active.')
+    } catch {
+      setLastIntent('Impossible d activer le plein ecran.')
+    }
+  }, [isFullscreenSupported])
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const fullscreenElement = document.fullscreenElement
+      setIsFullscreen(fullscreenElement === appShellRef.current)
+    }
+
+    handleFullscreenChange()
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  }, [toggleFullscreen])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat) {
+        return
+      }
+
+      const target = event.target
+      const isEditableTarget =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+
+      if (isEditableTarget) {
+        return
+      }
+
+      if (event.key.toLowerCase() === 'f') {
+        event.preventDefault()
+        void toggleFullscreen()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [toggleFullscreen])
+
   useEffect(() => {
     if (!voice.isListening) {
       return
@@ -422,7 +493,7 @@ function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" ref={appShellRef}>
       <main className="workspace">
         <PresentationStage
           activeNodeId={activeNodeId}
@@ -433,6 +504,19 @@ function App() {
           onOverview={() => commitSelection(null, 'Retour a l ensemble.')}
         />
       </main>
+
+      <button
+        aria-label={isFullscreen ? 'Quitter le plein ecran' : 'Activer le plein ecran'}
+        className={`fullscreen-toggle ${isFullscreen ? 'fullscreen-toggle--active' : ''}`}
+        disabled={!isFullscreenSupported}
+        onClick={() => {
+          void toggleFullscreen()
+        }}
+        type="button"
+      >
+        <span>{isFullscreen ? 'Sortir' : 'Plein ecran'}</span>
+        <small>{isFullscreen ? 'Esc' : 'F'}</small>
+      </button>
 
       <button
         aria-expanded={isPanelOpen}
@@ -447,6 +531,28 @@ function App() {
       </button>
 
       <aside className={`hud hud--panel ${isPanelOpen ? 'hud--panel-open' : ''}`}>
+        <section className="panel-section">
+          <p className="eyebrow">Affichage</p>
+          <div className="voice-status">
+            <button
+              className="control-button"
+              disabled={!isFullscreenSupported}
+              onClick={() => {
+                void toggleFullscreen()
+              }}
+              type="button"
+            >
+              {isFullscreen ? 'Quitter le plein ecran' : 'Plein ecran'}
+            </button>
+            <span className={`status-chip ${isFullscreen ? 'status-chip--live' : ''}`}>
+              {isFullscreen ? 'Sans chrome' : 'Avec chrome'}
+            </span>
+          </div>
+          <p className="panel-copy">
+            Utilisez le bouton ou la touche <em>F</em> pour basculer en plein ecran. Dans les navigateurs compatibles, l app demande aussi a masquer l interface du navigateur.
+          </p>
+        </section>
+
         <section className="panel-section">
           <p className="eyebrow">Speech Router</p>
           <div className="voice-status">

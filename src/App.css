@@ -1,17 +1,69 @@
 .app-shell {
   position: relative;
-  min-height: 100vh;
+  min-height: 100dvh;
   overflow: hidden;
   background: #000000;
 }
 
+.app-shell:fullscreen {
+  width: 100vw;
+  height: 100dvh;
+}
+
 .workspace {
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .hud {
   position: absolute;
   z-index: 20;
+}
+
+.fullscreen-toggle {
+  position: absolute;
+  top: 1.1rem;
+  right: 4.75rem;
+  z-index: 24;
+  display: grid;
+  justify-items: start;
+  gap: 0.1rem;
+  min-width: 7.8rem;
+  padding: 0.72rem 0.9rem 0.68rem;
+  border: 1px solid #ffffff;
+  background: rgba(0, 0, 0, 0.92);
+  color: #ffffff;
+  text-align: left;
+  transition:
+    background 220ms ease,
+    transform 220ms ease,
+    opacity 220ms ease;
+}
+
+.fullscreen-toggle:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  transform: translateY(-1px);
+}
+
+.fullscreen-toggle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.fullscreen-toggle span {
+  font-size: 0.92rem;
+  line-height: 1;
+}
+
+.fullscreen-toggle small {
+  font-size: 0.68rem;
+  line-height: 1;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.fullscreen-toggle--active {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .menu-toggle {
@@ -229,7 +281,7 @@
 
 .stage {
   position: relative;
-  min-height: 100vh;
+  min-height: 100dvh;
   overflow: hidden;
   background: #000000;
   cursor: grab;
@@ -418,6 +470,16 @@
 }
 
 @media (max-width: 720px) {
+  .fullscreen-toggle {
+    right: 4.55rem;
+    min-width: 6.6rem;
+    padding-inline: 0.75rem;
+  }
+
+  .fullscreen-toggle span {
+    font-size: 0.82rem;
+  }
+
   .hud--panel {
     width: calc(100vw - 2rem);
   }
