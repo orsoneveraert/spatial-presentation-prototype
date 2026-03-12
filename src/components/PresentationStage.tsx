@@ -85,8 +85,6 @@ export function PresentationStage({
     viewport.width,
     viewport.height,
   )
-  const isOverview = activeNodeId === null
-
   return (
     <section className="stage">
       <div
@@ -138,11 +136,9 @@ export function PresentationStage({
                 aria-label={node.title}
                 type="button"
               >
-                {isOverview ? (
-                  <span aria-hidden="true" className="frame__page-number">
-                    {`p.${node.pageNumber}`}
-                  </span>
-                ) : null}
+                <span aria-hidden="true" className="frame__page-number">
+                  {`p.${node.pageNumber}`}
+                </span>
               </button>
             )
           })}

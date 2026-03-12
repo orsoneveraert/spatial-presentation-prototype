@@ -488,7 +488,7 @@ export function useWhisperTriggerRouter({
       onMatchRef.current(match)
       setTriggerState('idle')
     } catch {
-      setError('Le service WhisperX est inaccessible. Lancez le backend puis recommencez.')
+      setError('Le moteur vocal est inaccessible. Lancez le backend puis recommencez.')
       setIsServiceReady(false)
       stop()
     } finally {
@@ -516,12 +516,12 @@ export function useWhisperTriggerRouter({
       setIsServiceReady(serviceReady)
 
       if (!serviceReady) {
-        setError('Le backend WhisperX est hors ligne. Lancez d abord le service Python.')
+        setError('Le backend vocal est hors ligne. Lancez d abord le service local.')
         return
       }
     } catch {
       setIsServiceReady(false)
-      setError('Le backend WhisperX est hors ligne. Lancez d abord le service Python.')
+      setError('Le backend vocal est hors ligne. Lancez d abord le service local.')
       return
     }
 

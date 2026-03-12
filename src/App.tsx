@@ -1,4 +1,4 @@
-import { startTransition, useDeferredValue, useState, type FormEvent } from 'react'
+import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import './App.css'
 import { PresentationStage } from './components/PresentationStage'
 import {
@@ -21,7 +21,13 @@ const overviewKeywords = [
   'retour',
   'centre',
   'dezoom',
+  'de zoom',
   'dezoome',
+  'va en arriere',
+  'en arriere',
+  'prend du recul',
+  'prends du recul',
+  'prendre du recul',
   'recul',
 ]
 
@@ -42,6 +48,31 @@ const previousPageKeywords = [
   'precedent',
   'précédent',
 ] as const
+
+const pageTokenToPageNumber: Record<string, string> = {
+  '1': '01',
+  '01': '01',
+  un: '01',
+  une: '01',
+  premier: '01',
+  premiere: '01',
+  '2': '02',
+  '02': '02',
+  deux: '02',
+  second: '02',
+  seconde: '02',
+  '3': '03',
+  '03': '03',
+  trois: '03',
+  '4': '04',
+  '04': '04',
+  quatre: '04',
+  '5': '05',
+  '05': '05',
+  cinq: '05',
+}
+
+const pageTokenFillers = new Set(['la', 'le', 'les', 'numero', 'numero', 'num', 'n', 'no'])
 
 const voiceCommandTargets: PresentationNode[] = [
   {
@@ -71,9 +102,10 @@ const voiceCommandTargets: PresentationNode[] = [
 function App() {
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null)
   const [manualCommand, setManualCommand] = useState('')
-  const [lastIntent, setLastIntent] = useState('Dites une forme de "aller", "regarder" ou "page", puis un concept de temps ou "suivante / arriere".')
+  const [lastIntent, setLastIntent] = useState('Dites une forme de "aller", "regarder" ou "page", puis un concept, "suivante / arriere", ou "page 3".')
   const [isPanelOpen, setIsPanelOpen] = useState(false)
-  const voiceTargets = [...presentationNodes, ...voiceCommandTargets]
+  const lastDirectCommandRef = useRef<{ signature: string; timestamp: number } | null>(null)
+  const voiceTargets = useMemo(() => [...presentationNodes, ...voiceCommandTargets], [])
 
   const commitSelection = (nextNodeId: string | null, reason: string) => {
     startTransition(() => {
@@ -110,6 +142,50 @@ function App() {
   const matchesOneOf = (intent: string, keywords: readonly string[]) =>
     keywords.some((keyword) => intent.includes(normalizePhrase(keyword)))
 
+  const findNodeByPageReference = (intent: string) => {
+    const words = intent.split(' ').filter(Boolean)
+
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== 'page') {
+        continue
+      }
+
+      for (let cursor = index + 1; cursor < Math.min(words.length, index + 4); cursor += 1) {
+        const token = words[cursor]
+
+        if (pageTokenFillers.has(token)) {
+          continue
+        }
+
+        const pageNumber = pageTokenToPageNumber[token]
+
+        if (!pageNumber) {
+          break
+        }
+
+        return presentationNodes.find((node) => node.pageNumber === pageNumber) ?? null
+      }
+    }
+
+    return null
+  }
+
+  const shouldSkipDirectCommand = (signature: string) => {
+    const now = Date.now()
+    const lastDirectCommand = lastDirectCommandRef.current
+
+    if (
+      lastDirectCommand &&
+      lastDirectCommand.signature === signature &&
+      now - lastDirectCommand.timestamp < 4000
+    ) {
+      return true
+    }
+
+    lastDirectCommandRef.current = { signature, timestamp: now }
+    return false
+  }
+
   const runIntent = (rawIntent: string) => {
     const normalizedIntent = normalizePhrase(rawIntent)
 
@@ -117,7 +193,7 @@ function App() {
       return
     }
 
-    if (overviewKeywords.some((keyword) => normalizedIntent.includes(keyword))) {
+    if (matchesOneOf(normalizedIntent, overviewKeywords)) {
       commitSelection(null, `Commande vocale: ${normalizedIntent}`)
       return
     }
@@ -129,6 +205,13 @@ function App() {
 
     if (normalizedIntent.includes('page') && matchesOneOf(normalizedIntent, previousPageKeywords)) {
       moveSelection('previous', `Commande vocale: ${normalizedIntent}`)
+      return
+    }
+
+    const pageNode = findNodeByPageReference(normalizedIntent)
+
+    if (pageNode) {
+      commitSelection(pageNode.id, `Page ${pageNode.pageNumber} reconnue.`)
       return
     }
 
@@ -147,23 +230,55 @@ function App() {
     nodes: voiceTargets,
     onMatch: ({ keyword, node }) => {
       if (node.id === 'command-next-page') {
-        moveSelection('next', `WhisperX a entendu une gachette, puis ${keyword}.`)
+        moveSelection('next', `Le moteur a entendu une gachette, puis ${keyword}.`)
         return
       }
 
       if (node.id === 'command-previous-page') {
-        moveSelection('previous', `WhisperX a entendu une gachette, puis ${keyword}.`)
+        moveSelection('previous', `Le moteur a entendu une gachette, puis ${keyword}.`)
         return
       }
 
       commitSelection(
         node.id,
-        `WhisperX a entendu une gachette, puis ${keyword}.`,
+        `Le moteur a entendu une gachette, puis ${keyword}.`,
       )
     },
   })
 
   const deferredTranscript = useDeferredValue(voice.windowTranscript || voice.transcript)
+
+  useEffect(() => {
+    if (!voice.isListening) {
+      return
+    }
+
+    const normalizedTranscript = normalizePhrase(voice.windowTranscript || voice.transcript)
+
+    if (!normalizedTranscript) {
+      return
+    }
+
+    const pageNode = findNodeByPageReference(normalizedTranscript)
+
+    if (pageNode) {
+      const signature = `page:${pageNode.pageNumber}:${normalizedTranscript}`
+
+      if (!shouldSkipDirectCommand(signature)) {
+        commitSelection(pageNode.id, `Le moteur a entendu la page ${pageNode.pageNumber}.`)
+      }
+
+      return
+    }
+
+    if (matchesOneOf(normalizedTranscript, overviewKeywords)) {
+      const signature = `overview:${normalizedTranscript}`
+
+      if (!shouldSkipDirectCommand(signature)) {
+        commitSelection(null, `Commande vocale: ${normalizedTranscript}`)
+      }
+    }
+  }, [voice.isListening, voice.transcript, voice.windowTranscript])
 
   const handleManualSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -198,7 +313,7 @@ function App() {
 
       <aside className={`hud hud--panel ${isPanelOpen ? 'hud--panel-open' : ''}`}>
         <section className="panel-section">
-          <p className="eyebrow">WhisperX Router</p>
+          <p className="eyebrow">Speech Router</p>
           <div className="voice-status">
             <button
               className="control-button"
@@ -219,7 +334,7 @@ function App() {
               {voice.supported ? (voice.isListening ? (voice.triggerState === 'armed' ? 'Armee' : 'Veille') : 'Pret') : 'Indisponible'}
             </span>
             <span className={`status-chip ${voice.isServiceReady ? 'status-chip--live' : ''}`}>
-              {voice.isServiceReady ? 'WhisperX en ligne' : 'WhisperX hors ligne'}
+              {voice.isServiceReady ? 'Moteur en ligne' : 'Moteur hors ligne'}
             </span>
           </div>
           <p className="panel-copy">{voice.error ?? lastIntent}</p>
@@ -239,7 +354,7 @@ function App() {
         <section className="panel-section">
           <p className="eyebrow">Direction</p>
           <p className="panel-copy">
-            La gachette expire apres 10 secondes si aucun mot directeur n&apos;arrive. Vous pouvez dire un concept de temps, ou bien <em>page suivante</em> / <em>page arriere</em>.
+            La gachette expire apres 10 secondes si aucun mot directeur n&apos;arrive. Vous pouvez dire un concept de temps, <em>page suivante</em>, <em>page arriere</em>, <em>va en arriere</em>, <em>de-zoom</em>, <em>prend du recul</em> ou <em>va a la page 3</em>.
           </p>
         </section>
 
@@ -250,7 +365,7 @@ function App() {
               aria-label="Type a command"
               className="command-input"
               onChange={(event) => setManualCommand(event.target.value)}
-              placeholder='Essayez "page suivante", "regarde aube" ou "ensemble"'
+              placeholder='Essayez "page 3", "page suivante", "de-zoom" ou "regarde aube"'
               value={manualCommand}
             />
             <button className="control-button" type="submit">

@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import json
 import logging
+import mimetypes
 import os
 import sys
 import tempfile
 import threading
+import urllib.error
+import urllib.request
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -17,12 +22,21 @@ except ImportError:  # pragma: no cover
     whisperx = None
 
 
+BACKEND = os.getenv("WHISPER_BACKEND", "whisperx").strip().lower() or "whisperx"
 MODEL_NAME = os.getenv("WHISPERX_MODEL", "large-v3")
 DEVICE = os.getenv("WHISPERX_DEVICE", "cpu")
 COMPUTE_TYPE = os.getenv("WHISPERX_COMPUTE_TYPE", "int8")
 BATCH_SIZE = int(os.getenv("WHISPERX_BATCH_SIZE", "8"))
 ENABLE_ALIGNMENT = os.getenv("WHISPERX_ENABLE_ALIGNMENT", "false").lower() == "true"
 TRANSCRIBE_LANGUAGE = os.getenv("WHISPERX_LANGUAGE", "fr").strip().lower() or "fr"
+WHISPERCPP_BASE_URL = os.getenv("WHISPERCPP_BASE_URL", "http://127.0.0.1:8178").rstrip("/")
+WHISPERCPP_MODEL_PATH = Path(
+    os.getenv(
+        "WHISPERCPP_MODEL",
+        str(Path(__file__).resolve().parent.parent / "models" / "ggml-large-v3.bin"),
+    )
+)
+WHISPERCPP_TIMEOUT = float(os.getenv("WHISPERCPP_TIMEOUT", "60"))
 ALLOW_ORIGINS = [
     origin.strip()
     for origin in os.getenv("WHISPERX_ALLOW_ORIGINS", "*").split(",")
@@ -100,7 +114,94 @@ class WhisperXService:
         return result
 
 
-service = WhisperXService()
+class WhisperCppHttpService:
+    def available(self) -> bool:
+        request = urllib.request.Request(f"{WHISPERCPP_BASE_URL}/", method="GET")
+
+        try:
+            with urllib.request.urlopen(request, timeout=2) as response:
+                return 200 <= response.status < 500
+        except OSError:
+            return False
+        except urllib.error.URLError:
+            return False
+
+    def model_loaded(self) -> bool:
+        return self.available()
+
+    def transcribe_file(self, audio_path: Path) -> dict[str, Any]:
+        payload = self._post_multipart(
+            f"{WHISPERCPP_BASE_URL}/inference",
+            fields={
+                "response_format": "json",
+            },
+            file_field="file",
+            file_path=audio_path,
+        )
+        transcript = str(payload.get("text", "")).strip()
+
+        return {
+            "language": TRANSCRIBE_LANGUAGE,
+            "segments": ([{"text": transcript}] if transcript else []),
+        }
+
+    def _post_multipart(
+        self,
+        url: str,
+        *,
+        fields: dict[str, str],
+        file_field: str,
+        file_path: Path,
+    ) -> dict[str, Any]:
+        boundary = f"----codex-{uuid.uuid4().hex}"
+        body = bytearray()
+
+        for name, value in fields.items():
+            body.extend(f"--{boundary}\r\n".encode("utf-8"))
+            body.extend(
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8")
+            )
+            body.extend(str(value).encode("utf-8"))
+            body.extend(b"\r\n")
+
+        content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+
+        body.extend(f"--{boundary}\r\n".encode("utf-8"))
+        body.extend(
+            (
+                f'Content-Disposition: form-data; name="{file_field}"; '
+                f'filename="{file_path.name}"\r\n'
+            ).encode("utf-8")
+        )
+        body.extend(f"Content-Type: {content_type}\r\n\r\n".encode("utf-8"))
+        body.extend(file_path.read_bytes())
+        body.extend(b"\r\n")
+        body.extend(f"--{boundary}--\r\n".encode("utf-8"))
+
+        request = urllib.request.Request(
+            url,
+            data=bytes(body),
+            headers={
+                "Accept": "application/json",
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+            },
+            method="POST",
+        )
+
+        with urllib.request.urlopen(request, timeout=WHISPERCPP_TIMEOUT) as response:
+            raw_payload = response.read().decode("utf-8")
+
+        return json.loads(raw_payload)
+
+
+def build_service() -> WhisperXService | WhisperCppHttpService:
+    if BACKEND in {"whispercpp", "whispercpp-http"}:
+        return WhisperCppHttpService()
+
+    return WhisperXService()
+
+
+service = build_service()
 
 app = FastAPI(title="Spatial Presentation WhisperX Service")
 app.add_middleware(
@@ -119,26 +220,30 @@ def is_recoverable_audio_error(exc: Exception) -> bool:
 
 @app.get("/api/health")
 def health() -> dict[str, Any]:
-    supported_python = sys.version_info < (3, 13)
+    supported_python = sys.version_info < (3, 13) or BACKEND in {"whispercpp", "whispercpp-http"}
+    model_name = WHISPERCPP_MODEL_PATH.name if BACKEND in {"whispercpp", "whispercpp-http"} else MODEL_NAME
 
     return {
         "ok": service.available() and supported_python,
         "model_loaded": service.model_loaded(),
+        "backend": BACKEND,
         "language": TRANSCRIBE_LANGUAGE,
-        "model": MODEL_NAME,
+        "model": model_name,
         "python_version": sys.version.split()[0],
-        "requires_python": "<3.13",
+        "requires_python": "<3.13" if BACKEND == "whisperx" else "any",
         "whisperx_available": service.available(),
         "note": (
             "WhisperX requires a Python version below 3.13. "
             "Use Python 3.10 to 3.12 for the backend."
+            if BACKEND == "whisperx"
+            else "Using whisper.cpp over a local HTTP bridge."
         ),
     }
 
 
 @app.post("/api/transcribe")
 async def transcribe(file: UploadFile = File(...)) -> dict[str, Any]:
-    supported_python = sys.version_info < (3, 13)
+    supported_python = sys.version_info < (3, 13) or BACKEND in {"whispercpp", "whispercpp-http"}
 
     if not supported_python:
         raise HTTPException(
@@ -149,7 +254,11 @@ async def transcribe(file: UploadFile = File(...)) -> dict[str, Any]:
     if not service.available():
         raise HTTPException(
             status_code=503,
-            detail="WhisperX is not installed in this Python environment.",
+            detail=(
+                "The whisper.cpp server is not reachable."
+                if BACKEND in {"whispercpp", "whispercpp-http"}
+                else "WhisperX is not installed in this Python environment."
+            ),
         )
 
     suffix = Path(file.filename or "chunk.webm").suffix or ".webm"
