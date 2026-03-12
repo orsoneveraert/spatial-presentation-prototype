@@ -1,0 +1,11 @@
+.git
+.github
+.venv-whisperx
+node_modules
+dist
+dist-ssr
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
