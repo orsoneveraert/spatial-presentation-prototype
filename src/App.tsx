@@ -1,4 +1,4 @@
-import { Fragment, startTransition, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { Fragment, startTransition, useDeferredValue, useEffect, useEffectEvent, useMemo, useRef, useState, type FormEvent } from 'react'
 import './App.css'
 import { PresentationStage } from './components/PresentationStage'
 import {
@@ -263,6 +263,75 @@ function App() {
     return false
   }
 
+  const tryHandleDirectPageIntent = (
+    normalizedIntent: string,
+    options?: {
+      reasonPrefix?: string
+      skipSignaturePrefix?: string
+      useDeduplication?: boolean
+    },
+  ) => {
+    if (!normalizedIntent.startsWith('page')) {
+      return false
+    }
+
+    if (matchesOneOf(normalizedIntent, nextPageKeywords)) {
+      const signature = `page-next:${normalizedIntent}`
+
+      if (!options?.useDeduplication || !shouldSkipDirectCommand(signature)) {
+        moveSelection('next', `${options?.reasonPrefix ?? 'Commande vocale'}: ${normalizedIntent}`)
+      }
+
+      return true
+    }
+
+    if (matchesOneOf(normalizedIntent, previousPageKeywords)) {
+      const signature = `page-previous:${normalizedIntent}`
+
+      if (!options?.useDeduplication || !shouldSkipDirectCommand(signature)) {
+        moveSelection('previous', `${options?.reasonPrefix ?? 'Commande vocale'}: ${normalizedIntent}`)
+      }
+
+      return true
+    }
+
+    const pageNode = findNodeByPageReference(normalizedIntent)
+
+    if (pageNode) {
+      const signature = `${options?.skipSignaturePrefix ?? 'page'}:${pageNode.pageNumber}:${normalizedIntent}`
+
+      if (!options?.useDeduplication || !shouldSkipDirectCommand(signature)) {
+        commitSelection(pageNode.id, `Page ${pageNode.pageNumber} reconnue.`)
+      }
+
+      return true
+    }
+
+    const trimmedPageIntent = normalizedIntent
+      .replace(/^page\b/, '')
+      .split(' ')
+      .filter((token) => token && !pageTokenFillers.has(token))
+      .join(' ')
+
+    if (!trimmedPageIntent) {
+      return false
+    }
+
+    const match = findNodeByIntent(presentationNodes, trimmedPageIntent)
+
+    if (!match) {
+      return false
+    }
+
+    const signature = `${options?.skipSignaturePrefix ?? 'page-keyword'}:${match.node.id}:${trimmedPageIntent}`
+
+    if (!options?.useDeduplication || !shouldSkipDirectCommand(signature)) {
+      commitSelection(match.node.id, `${options?.reasonPrefix ?? 'Commande vocale'}: ${normalizedIntent}`)
+    }
+
+    return true
+  }
+
   const runIntent = (rawIntent: string) => {
     const normalizedIntent = normalizePhrase(rawIntent)
 
@@ -275,20 +344,7 @@ function App() {
       return
     }
 
-    if (normalizedIntent.includes('page') && matchesOneOf(normalizedIntent, nextPageKeywords)) {
-      moveSelection('next', `Commande vocale: ${normalizedIntent}`)
-      return
-    }
-
-    if (normalizedIntent.includes('page') && matchesOneOf(normalizedIntent, previousPageKeywords)) {
-      moveSelection('previous', `Commande vocale: ${normalizedIntent}`)
-      return
-    }
-
-    const pageNode = findNodeByPageReference(normalizedIntent)
-
-    if (pageNode) {
-      commitSelection(pageNode.id, `Page ${pageNode.pageNumber} reconnue.`)
+    if (tryHandleDirectPageIntent(normalizedIntent, { reasonPrefix: 'Commande vocale' })) {
       return
     }
 
@@ -325,6 +381,26 @@ function App() {
 
   const deferredTranscriptHistory = useDeferredValue(voice.transcriptHistory)
 
+  const handleVoiceTranscript = useEffectEvent((normalizedTranscript: string) => {
+    if (
+      tryHandleDirectPageIntent(normalizedTranscript, {
+        reasonPrefix: 'Le moteur a entendu',
+        skipSignaturePrefix: 'direct-page',
+        useDeduplication: true,
+      })
+    ) {
+      return
+    }
+
+    if (matchesOneOf(normalizedTranscript, overviewKeywords)) {
+      const signature = `overview:${normalizedTranscript}`
+
+      if (!shouldSkipDirectCommand(signature)) {
+        commitSelection(null, `Commande vocale: ${normalizedTranscript}`)
+      }
+    }
+  })
+
   useEffect(() => {
     if (!voice.isListening) {
       return
@@ -336,25 +412,7 @@ function App() {
       return
     }
 
-    const pageNode = findNodeByPageReference(normalizedTranscript)
-
-    if (pageNode) {
-      const signature = `page:${pageNode.pageNumber}:${normalizedTranscript}`
-
-      if (!shouldSkipDirectCommand(signature)) {
-        commitSelection(pageNode.id, `Le moteur a entendu la page ${pageNode.pageNumber}.`)
-      }
-
-      return
-    }
-
-    if (matchesOneOf(normalizedTranscript, overviewKeywords)) {
-      const signature = `overview:${normalizedTranscript}`
-
-      if (!shouldSkipDirectCommand(signature)) {
-        commitSelection(null, `Commande vocale: ${normalizedTranscript}`)
-      }
-    }
+    handleVoiceTranscript(normalizedTranscript)
   }, [voice.isListening, voice.transcript, voice.windowTranscript])
 
   const handleManualSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -441,7 +499,7 @@ function App() {
         <section className="panel-section">
           <p className="eyebrow">Direction</p>
           <p className="panel-copy">
-            La gachette expire apres 10 secondes si aucun mot directeur n&apos;arrive. Utilisez maintenant un seul mot par page, par exemple <em>couverture</em>, <em>pomodoro</em>, <em>trousse</em>, <em>resonance</em>, ou bien <em>page suivante</em>, <em>page arriere</em>, <em>va en arriere</em>, <em>de-zoom</em>, <em>prend du recul</em> et <em>va a la page 18</em>.
+            La gachette expire apres 10 secondes si aucun mot directeur n&apos;arrive. Utilisez maintenant un seul mot par page, par exemple <em>couverture</em>, <em>pomodoro</em>, <em>trousse</em>, <em>resonance</em>. Les phrases qui commencent par <em>page</em> passent aussi directement, comme <em>page couverture</em>, <em>page suivante</em>, <em>page arriere</em> ou <em>page 18</em>.
           </p>
         </section>
 
@@ -452,7 +510,7 @@ function App() {
               aria-label="Type a command"
               className="command-input"
               onChange={(event) => setManualCommand(event.target.value)}
-              placeholder='Essayez "page 18", "page suivante", "de-zoom" ou "regarde couverture"'
+              placeholder='Essayez "page couverture", "page 18", "page suivante" ou "regarde couverture"'
               value={manualCommand}
             />
             <button className="control-button" type="submit">
