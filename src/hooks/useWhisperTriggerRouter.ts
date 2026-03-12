@@ -20,11 +20,6 @@ type VoiceEvent =
       timestamp: number
     }
 
-type TranscriptChunk = {
-  text: string
-  timestamp: number
-}
-
 type WhisperTranscriptionResponse = {
   language?: string | null
   transcript: string
@@ -56,20 +51,24 @@ type UseWhisperTriggerRouterState = {
   windowTranscript: string
 }
 
-function chunkExtensionForMimeType(mimeType?: string) {
-  if (!mimeType) {
-    return 'webm'
+type MatchMemory = {
+  keyword: string
+  nodeId: string
+  timestamp: number
+}
+
+type AudioContextWindow = Window &
+  typeof globalThis & {
+    webkitAudioContext?: typeof AudioContext
   }
 
-  if (mimeType.includes('mp4')) {
-    return 'mp4'
+function getAudioContextConstructor() {
+  if (typeof window === 'undefined') {
+    return null
   }
 
-  if (mimeType.includes('ogg')) {
-    return 'ogg'
-  }
-
-  return 'webm'
+  const audioWindow = window as AudioContextWindow
+  return audioWindow.AudioContext ?? audioWindow.webkitAudioContext ?? null
 }
 
 function isMediaCaptureSupported() {
@@ -77,22 +76,79 @@ function isMediaCaptureSupported() {
     typeof window !== 'undefined' &&
     typeof navigator !== 'undefined' &&
     Boolean(navigator.mediaDevices?.getUserMedia) &&
-    typeof MediaRecorder !== 'undefined'
+    getAudioContextConstructor() !== null
   )
 }
 
-function chooseMimeType() {
-  if (typeof MediaRecorder === 'undefined') {
-    return undefined
+function floatTo16BitPcm(view: DataView, offset: number, input: Float32Array) {
+  let pointer = offset
+
+  for (let index = 0; index < input.length; index += 1) {
+    const sample = Math.max(-1, Math.min(1, input[index]))
+    view.setInt16(pointer, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true)
+    pointer += 2
+  }
+}
+
+function encodeWav(samples: Float32Array, sampleRate: number) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2)
+  const view = new DataView(buffer)
+  const writeString = (offset: number, value: string) => {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset + index, value.charCodeAt(index))
+    }
   }
 
-  const candidates = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/mp4',
-  ]
+  writeString(0, 'RIFF')
+  view.setUint32(4, 36 + samples.length * 2, true)
+  writeString(8, 'WAVE')
+  writeString(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * 2, true)
+  view.setUint16(32, 2, true)
+  view.setUint16(34, 16, true)
+  writeString(36, 'data')
+  view.setUint32(40, samples.length * 2, true)
+  floatTo16BitPcm(view, 44, samples)
 
-  return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate))
+  return new Blob([buffer], { type: 'audio/wav' })
+}
+
+function collectLatestSamples(chunks: Float32Array[], desiredSamples: number) {
+  if (desiredSamples <= 0 || chunks.length === 0) {
+    return new Float32Array()
+  }
+
+  const slices: Float32Array[] = []
+  let remaining = desiredSamples
+
+  for (let index = chunks.length - 1; index >= 0 && remaining > 0; index -= 1) {
+    const chunk = chunks[index]
+
+    if (chunk.length <= remaining) {
+      slices.push(chunk)
+      remaining -= chunk.length
+      continue
+    }
+
+    slices.push(chunk.subarray(chunk.length - remaining))
+    remaining = 0
+  }
+
+  const orderedSlices = slices.reverse()
+  const totalLength = orderedSlices.reduce((sum, chunk) => sum + chunk.length, 0)
+  const merged = new Float32Array(totalLength)
+  let offset = 0
+
+  orderedSlices.forEach((chunk) => {
+    merged.set(chunk, offset)
+    offset += chunk.length
+  })
+
+  return merged
 }
 
 function deriveTriggerState(
@@ -124,10 +180,10 @@ function evaluateTriggerWindow(
   const armingEvent = [...sorted]
     .reverse()
     .find(
-    (event) =>
-      event.kind === 'arming' &&
-      normalizedArming.has(event.keyword),
-  )
+      (event) =>
+        event.kind === 'arming' &&
+        normalizedArming.has(event.keyword),
+    )
 
   if (!armingEvent) {
     return null
@@ -215,21 +271,25 @@ async function pingService() {
 
 export function useWhisperTriggerRouter({
   armingWords,
-  chunkMs = 5000,
+  chunkMs = 2500,
   nodes,
   onMatch,
   windowMs = 10000,
 }: UseWhisperTriggerRouterOptions): UseWhisperTriggerRouterState {
   const onMatchRef = useRef(onMatch)
-  const queueRef = useRef<Blob[]>([])
-  const processingRef = useRef(false)
-  const recorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const chunkTimerRef = useRef<number | null>(null)
-  const shouldContinueRef = useRef(false)
-  const chunkExtensionRef = useRef('webm')
-  const transcriptChunksRef = useRef<TranscriptChunk[]>([])
-  const eventsRef = useRef<VoiceEvent[]>([])
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null)
+  const processorNodeRef = useRef<ScriptProcessorNode | null>(null)
+  const sinkNodeRef = useRef<GainNode | null>(null)
+  const analysisIntervalRef = useRef<number | null>(null)
+  const analysisInFlightRef = useRef(false)
+  const pendingAnalysisRef = useRef(false)
+  const isRunningRef = useRef(false)
+  const sampleRateRef = useRef(0)
+  const audioChunksRef = useRef<Float32Array[]>([])
+  const bufferedSamplesRef = useRef(0)
+  const lastMatchRef = useRef<MatchMemory | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isListening, setIsListening] = useState(false)
   const [isServiceReady, setIsServiceReady] = useState(false)
@@ -246,82 +306,133 @@ export function useWhisperTriggerRouter({
     onMatchRef.current = onMatch
   }, [onMatch])
 
-  const clearChunkTimer = () => {
-    if (chunkTimerRef.current !== null) {
-      window.clearTimeout(chunkTimerRef.current)
-      chunkTimerRef.current = null
+  const clearAnalysisInterval = () => {
+    if (analysisIntervalRef.current !== null) {
+      window.clearInterval(analysisIntervalRef.current)
+      analysisIntervalRef.current = null
+    }
+  }
+
+  const clearAudioBuffer = () => {
+    audioChunksRef.current = []
+    bufferedSamplesRef.current = 0
+  }
+
+  const trimAudioBuffer = () => {
+    const sampleRate = sampleRateRef.current
+
+    if (!sampleRate) {
+      return
+    }
+
+    const maxBufferedSamples = Math.ceil(sampleRate * Math.max(windowMs * 1.5, windowMs + 4000) / 1000)
+
+    while (bufferedSamplesRef.current > maxBufferedSamples && audioChunksRef.current.length > 0) {
+      const overflow = bufferedSamplesRef.current - maxBufferedSamples
+      const firstChunk = audioChunksRef.current[0]
+
+      if (firstChunk.length <= overflow) {
+        audioChunksRef.current.shift()
+        bufferedSamplesRef.current -= firstChunk.length
+        continue
+      }
+
+      audioChunksRef.current[0] = firstChunk.subarray(overflow)
+      bufferedSamplesRef.current -= overflow
+    }
+  }
+
+  const appendAudioSamples = (samples: Float32Array) => {
+    if (samples.length === 0) {
+      return
+    }
+
+    const copy = new Float32Array(samples)
+    audioChunksRef.current.push(copy)
+    bufferedSamplesRef.current += copy.length
+    trimAudioBuffer()
+  }
+
+  const teardownAudioGraph = () => {
+    processorNodeRef.current?.disconnect()
+    sourceNodeRef.current?.disconnect()
+    sinkNodeRef.current?.disconnect()
+
+    processorNodeRef.current = null
+    sourceNodeRef.current = null
+    sinkNodeRef.current = null
+
+    if (audioContextRef.current) {
+      void audioContextRef.current.close().catch(() => undefined)
+      audioContextRef.current = null
     }
   }
 
   const stop = () => {
-    shouldContinueRef.current = false
-    clearChunkTimer()
-
-    const recorder = recorderRef.current
-    recorderRef.current = null
-
-    if (recorder && recorder.state !== 'inactive') {
-      recorder.stop()
-    }
-
+    isRunningRef.current = false
+    analysisInFlightRef.current = false
+    pendingAnalysisRef.current = false
+    clearAnalysisInterval()
+    teardownAudioGraph()
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
-    queueRef.current = []
-    processingRef.current = false
+    sampleRateRef.current = 0
+    clearAudioBuffer()
     setIsListening(false)
+    setTriggerState('idle')
   }
 
-  const enqueueAudioChunk = (audioBlob: Blob) => {
-    queueRef.current.push(audioBlob)
-
-    const maxBufferedChunks = Math.max(2, Math.ceil(windowMs / chunkMs))
-
-    if (queueRef.current.length > maxBufferedChunks) {
-      queueRef.current.splice(0, queueRef.current.length - maxBufferedChunks)
-    }
-
-    void processQueue()
-  }
-
-  const processQueue = async () => {
-    if (processingRef.current || queueRef.current.length === 0) {
+  const analyzeWindow = async () => {
+    if (!isRunningRef.current) {
       return
     }
 
-    processingRef.current = true
+    if (analysisInFlightRef.current) {
+      pendingAnalysisRef.current = true
+      return
+    }
 
-    while (queueRef.current.length > 0) {
-      const audioBlob = queueRef.current.shift()
+    const sampleRate = sampleRateRef.current
 
-      if (!audioBlob || audioBlob.size < 1024) {
-        continue
-      }
+    if (!sampleRate || bufferedSamplesRef.current === 0) {
+      return
+    }
 
-      const formData = new FormData()
-      formData.append('file', audioBlob, `chunk.${chunkExtensionRef.current}`)
+    const desiredSamples = Math.min(
+      bufferedSamplesRef.current,
+      Math.ceil(sampleRate * windowMs / 1000),
+    )
+    const minimumSamples = Math.ceil(sampleRate * 1.5)
 
-      let response: Response
+    if (desiredSamples < minimumSamples) {
+      return
+    }
 
-      try {
-        response = await fetch(apiUrl('/api/transcribe'), {
-          mode: 'cors',
-          body: formData,
-          method: 'POST',
-          headers: {
-            Accept: 'application/json',
-          },
-        })
-      } catch {
-        setError('Le service WhisperX est inaccessible. Lancez le backend puis recommencez.')
-        setIsServiceReady(false)
-        stop()
-        break
-      }
+    analysisInFlightRef.current = true
+    pendingAnalysisRef.current = false
+
+    const wavBlob = encodeWav(
+      collectLatestSamples(audioChunksRef.current, desiredSamples),
+      sampleRate,
+    )
+
+    const formData = new FormData()
+    formData.append('file', wavBlob, 'window.wav')
+
+    try {
+      const response = await fetch(apiUrl('/api/transcribe'), {
+        mode: 'cors',
+        body: formData,
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+        },
+      })
 
       if (!response.ok) {
         setError('Un extrait audio a ete ignore. L ecoute continue.')
         setIsServiceReady(true)
-        continue
+        return
       }
 
       setIsServiceReady(true)
@@ -329,99 +440,69 @@ export function useWhisperTriggerRouter({
 
       const payload = (await response.json()) as WhisperTranscriptionResponse
       const normalizedTranscript = normalizePhrase(payload.transcript)
+      const timestamp = Date.now()
+
+      setTranscript(normalizedTranscript)
+      setWindowTranscript(normalizedTranscript)
 
       if (!normalizedTranscript) {
-        continue
-      }
-
-      const timestamp = Date.now()
-      setTranscript(normalizedTranscript)
-
-      const nextChunks = [
-        ...transcriptChunksRef.current,
-        {
-          text: normalizedTranscript,
-          timestamp,
-        },
-      ].filter((chunk) => timestamp - chunk.timestamp <= windowMs)
-
-      transcriptChunksRef.current = nextChunks
-      const nextWindowTranscript = nextChunks.map((chunk) => chunk.text).join(' ').trim()
-      setWindowTranscript(nextWindowTranscript)
-
-      const nextEvents = [
-        ...eventsRef.current.filter((event) => timestamp - event.timestamp <= windowMs),
-        ...extractEvents(normalizedTranscript, timestamp, normalizedArming, nodes),
-      ].filter((event) => timestamp - event.timestamp <= windowMs)
-
-      eventsRef.current = nextEvents
-      setTriggerState(deriveTriggerState(nextEvents, normalizedArming))
-
-      const match = evaluateTriggerWindow(
-        nextEvents,
-        normalizedArming,
-        nextWindowTranscript,
-      )
-
-      if (match) {
-        onMatchRef.current(match)
-        transcriptChunksRef.current = []
-        eventsRef.current = []
-        setWindowTranscript('')
         setTriggerState('idle')
-      }
-    }
-
-    processingRef.current = false
-  }
-
-  const startRecorderLoop = (stream: MediaStream, mimeType?: string) => {
-    if (!shouldContinueRef.current) {
-      return
-    }
-
-    const recorder = mimeType
-      ? new MediaRecorder(stream, { mimeType })
-      : new MediaRecorder(stream)
-
-    recorderRef.current = recorder
-
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        enqueueAudioChunk(event.data)
-      }
-    }
-
-    recorder.onerror = () => {
-      setError('La capture audio a rencontre une erreur. L ecoute s arrete.')
-      stop()
-    }
-
-    recorder.onstop = () => {
-      if (recorderRef.current === recorder) {
-        recorderRef.current = null
-      }
-
-      clearChunkTimer()
-
-      if (!shouldContinueRef.current) {
         return
       }
 
-      startRecorderLoop(stream, mimeType)
-    }
+      const events = extractEvents(
+        normalizedTranscript,
+        timestamp,
+        normalizedArming,
+        nodes,
+      )
 
-    recorder.start()
-    chunkTimerRef.current = window.setTimeout(() => {
-      if (recorder.state !== 'inactive') {
-        recorder.stop()
+      setTriggerState(deriveTriggerState(events, normalizedArming))
+
+      const match = evaluateTriggerWindow(
+        events,
+        normalizedArming,
+        normalizedTranscript,
+      )
+
+      if (!match) {
+        return
       }
-    }, chunkMs)
+
+      const lastMatch = lastMatchRef.current
+      const isDuplicate =
+        lastMatch !== null &&
+        lastMatch.nodeId === match.node.id &&
+        lastMatch.keyword === match.keyword &&
+        timestamp - lastMatch.timestamp < 4000
+
+      if (isDuplicate) {
+        return
+      }
+
+      lastMatchRef.current = {
+        keyword: match.keyword,
+        nodeId: match.node.id,
+        timestamp,
+      }
+      onMatchRef.current(match)
+      setTriggerState('idle')
+    } catch {
+      setError('Le service WhisperX est inaccessible. Lancez le backend puis recommencez.')
+      setIsServiceReady(false)
+      stop()
+    } finally {
+      analysisInFlightRef.current = false
+
+      if (pendingAnalysisRef.current && isRunningRef.current) {
+        void analyzeWindow()
+      }
+    }
   }
 
   const start = async () => {
     if (!supported) {
-      setError('La capture audio n est pas disponible dans ce navigateur.')
+      setError('La capture audio continue n est pas disponible dans ce navigateur.')
       return
     }
 
@@ -444,8 +525,16 @@ export function useWhisperTriggerRouter({
       return
     }
 
-    transcriptChunksRef.current = []
-    eventsRef.current = []
+    const AudioContextConstructor = getAudioContextConstructor()
+
+    if (!AudioContextConstructor) {
+      setError('La capture audio continue n est pas disponible dans ce navigateur.')
+      return
+    }
+
+    clearAudioBuffer()
+    lastMatchRef.current = null
+    setTranscript('')
     setWindowTranscript('')
     setTriggerState('idle')
 
@@ -455,19 +544,46 @@ export function useWhisperTriggerRouter({
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
+          autoGainControl: true,
         },
       })
-      const mimeType = chooseMimeType()
-      chunkExtensionRef.current = chunkExtensionForMimeType(mimeType)
-      shouldContinueRef.current = true
+      const audioContext = new AudioContextConstructor()
+
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume()
+      }
+
+      const source = audioContext.createMediaStreamSource(stream)
+      const processor = audioContext.createScriptProcessor(4096, 1, 1)
+      const sink = audioContext.createGain()
+
+      sink.gain.value = 0
+      processor.onaudioprocess = (event) => {
+        appendAudioSamples(event.inputBuffer.getChannelData(0))
+      }
+
+      source.connect(processor)
+      processor.connect(sink)
+      sink.connect(audioContext.destination)
+
       streamRef.current = stream
+      audioContextRef.current = audioContext
+      sourceNodeRef.current = source
+      processorNodeRef.current = processor
+      sinkNodeRef.current = sink
+      sampleRateRef.current = audioContext.sampleRate
+      isRunningRef.current = true
+      pendingAnalysisRef.current = false
+      analysisInFlightRef.current = false
       setError(null)
       setIsListening(true)
-      startRecorderLoop(stream, mimeType)
+
+      analysisIntervalRef.current = window.setInterval(() => {
+        void analyzeWindow()
+      }, chunkMs)
     } catch {
-      shouldContinueRef.current = false
+      stop()
       setError('L acces au microphone a ete bloque.')
-      setIsListening(false)
     }
   }
 
@@ -488,16 +604,15 @@ export function useWhisperTriggerRouter({
 
     return () => {
       active = false
-      shouldContinueRef.current = false
-      clearChunkTimer()
-      if (recorderRef.current && recorderRef.current.state !== 'inactive') {
-        recorderRef.current.stop()
-      }
-      recorderRef.current = null
+      isRunningRef.current = false
+      analysisInFlightRef.current = false
+      pendingAnalysisRef.current = false
+      clearAnalysisInterval()
+      teardownAudioGraph()
       streamRef.current?.getTracks().forEach((track) => track.stop())
       streamRef.current = null
-      queueRef.current = []
-      processingRef.current = false
+      sampleRateRef.current = 0
+      clearAudioBuffer()
     }
   }, [])
 

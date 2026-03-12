@@ -17,7 +17,7 @@ except ImportError:  # pragma: no cover
     whisperx = None
 
 
-MODEL_NAME = os.getenv("WHISPERX_MODEL", "base")
+MODEL_NAME = os.getenv("WHISPERX_MODEL", "small")
 DEVICE = os.getenv("WHISPERX_DEVICE", "cpu")
 COMPUTE_TYPE = os.getenv("WHISPERX_COMPUTE_TYPE", "int8")
 BATCH_SIZE = int(os.getenv("WHISPERX_BATCH_SIZE", "8"))
@@ -125,6 +125,7 @@ def health() -> dict[str, Any]:
         "ok": service.available() and supported_python,
         "model_loaded": service.model_loaded(),
         "language": TRANSCRIBE_LANGUAGE,
+        "model": MODEL_NAME,
         "python_version": sys.version.split()[0],
         "requires_python": "<3.13",
         "whisperx_available": service.available(),
