@@ -39,6 +39,13 @@ type UseWhisperTriggerRouterOptions = {
   windowMs?: number
 }
 
+export type TranscriptHistoryEntry = {
+  id: number
+  keywords: string[]
+  timestamp: number
+  transcript: string
+}
+
 type UseWhisperTriggerRouterState = {
   error: string | null
   isListening: boolean
@@ -47,6 +54,7 @@ type UseWhisperTriggerRouterState = {
   stop: () => void
   supported: boolean
   transcript: string
+  transcriptHistory: TranscriptHistoryEntry[]
   triggerState: TriggerState
   windowTranscript: string
 }
@@ -57,16 +65,24 @@ type MatchMemory = {
   timestamp: number
 }
 
+type ArmedState = {
+  expiresAt: number
+  keyword: string
+}
+
 type AudioContextWindow = Window &
   typeof globalThis & {
     webkitAudioContext?: typeof AudioContext
   }
 
 const TARGET_SAMPLE_RATE = 16000
-const MIN_ANALYSIS_MS = 1000
-const SILENCE_CHECK_MS = 1200
+const MIN_ANALYSIS_MS = 850
+const SILENCE_CHECK_MS = 850
 const SILENCE_RMS_THRESHOLD = 0.004
 const WORKLET_NAME = 'voice-capture-processor'
+const ARMED_EXPIRY_MS = 10000
+const IDLE_WINDOW_MS = 6500
+const MAX_HISTORY_ENTRIES = 8
 
 function getAudioContextConstructor() {
   if (typeof window === 'undefined') {
@@ -204,59 +220,6 @@ function collectLatestSamples(chunks: Float32Array[], desiredSamples: number) {
   return merged
 }
 
-function deriveTriggerState(
-  events: VoiceEvent[],
-  armingWords: string[],
-) {
-  const sorted = [...events].sort((left, right) => left.orderIndex - right.orderIndex)
-  const normalizedArming = new Set(armingWords.map((word) => normalizePhrase(word)))
-  const armingEvent = sorted.find(
-    (event) =>
-      event.kind === 'arming' &&
-      normalizedArming.has(event.keyword),
-  )
-
-  if (!armingEvent) {
-    return 'idle'
-  }
-
-  return 'armed'
-}
-
-function evaluateTriggerWindow(
-  events: VoiceEvent[],
-  armingWords: string[],
-  transcriptWindow: string,
-) {
-  const sorted = [...events].sort((left, right) => left.orderIndex - right.orderIndex)
-  const normalizedArming = new Set(armingWords.map((word) => normalizePhrase(word)))
-  const armingEvent = [...sorted]
-    .reverse()
-    .find(
-      (event) =>
-        event.kind === 'arming' &&
-        normalizedArming.has(event.keyword),
-    )
-
-  if (!armingEvent) {
-    return null
-  }
-
-  const targetEvent = sorted.find(
-    (event) => event.kind === 'target' && event.orderIndex > armingEvent.orderIndex,
-  )
-
-  if (!targetEvent || targetEvent.kind !== 'target') {
-    return null
-  }
-
-  return {
-    keyword: targetEvent.keyword,
-    node: targetEvent.node,
-    transcriptWindow,
-  }
-}
-
 function extractEvents(
   transcript: string,
   timestamp: number,
@@ -324,10 +287,10 @@ async function pingService() {
 
 export function useWhisperTriggerRouter({
   armingWords,
-  chunkMs = 2100,
+  chunkMs = 1450,
   nodes,
   onMatch,
-  windowMs = 10000,
+  windowMs = 11000,
 }: UseWhisperTriggerRouterOptions): UseWhisperTriggerRouterState {
   const onMatchRef = useRef(onMatch)
   const streamRef = useRef<MediaStream | null>(null)
@@ -344,10 +307,13 @@ export function useWhisperTriggerRouter({
   const audioChunksRef = useRef<Float32Array[]>([])
   const bufferedSamplesRef = useRef(0)
   const lastMatchRef = useRef<MatchMemory | null>(null)
+  const armedStateRef = useRef<ArmedState | null>(null)
+  const historyCounterRef = useRef(0)
   const [error, setError] = useState<string | null>(null)
   const [isListening, setIsListening] = useState(false)
   const [isServiceReady, setIsServiceReady] = useState(false)
   const [transcript, setTranscript] = useState('')
+  const [transcriptHistory, setTranscriptHistory] = useState<TranscriptHistoryEntry[]>([])
   const [windowTranscript, setWindowTranscript] = useState('')
   const [triggerState, setTriggerState] = useState<TriggerState>('idle')
   const supported = isMediaCaptureSupported()
@@ -370,6 +336,53 @@ export function useWhisperTriggerRouter({
   const clearAudioBuffer = () => {
     audioChunksRef.current = []
     bufferedSamplesRef.current = 0
+  }
+
+  const syncTriggerState = () => {
+    const activeArming =
+      armedStateRef.current && armedStateRef.current.expiresAt > Date.now()
+        ? armedStateRef.current
+        : null
+
+    armedStateRef.current = activeArming
+    setTriggerState(activeArming ? 'armed' : 'idle')
+  }
+
+  const pushTranscriptHistory = (nextTranscript: string, keywords: string[], timestamp: number) => {
+    if (!nextTranscript) {
+      return
+    }
+
+    setTranscriptHistory((currentHistory) => {
+      const nextKeywords = [...new Set(keywords)].sort()
+      const latestEntry = currentHistory[0]
+
+      if (
+        latestEntry &&
+        latestEntry.transcript === nextTranscript &&
+        latestEntry.keywords.join('|') === nextKeywords.join('|')
+      ) {
+        return [
+          {
+            ...latestEntry,
+            timestamp,
+          },
+          ...currentHistory.slice(1),
+        ]
+      }
+
+      historyCounterRef.current += 1
+
+      return [
+        {
+          id: historyCounterRef.current,
+          keywords: nextKeywords,
+          timestamp,
+          transcript: nextTranscript,
+        },
+        ...currentHistory,
+      ].slice(0, MAX_HISTORY_ENTRIES)
+    })
   }
 
   const trimAudioBuffer = () => {
@@ -482,6 +495,7 @@ export function useWhisperTriggerRouter({
     streamRef.current = null
     sampleRateRef.current = 0
     clearAudioBuffer()
+    armedStateRef.current = null
     setIsListening(false)
     setTriggerState('idle')
   }
@@ -502,9 +516,13 @@ export function useWhisperTriggerRouter({
       return
     }
 
+    const activeWindowMs =
+      armedStateRef.current && armedStateRef.current.expiresAt > Date.now()
+        ? windowMs
+        : Math.min(windowMs, IDLE_WINDOW_MS)
     const desiredSamples = Math.min(
       bufferedSamplesRef.current,
-      Math.ceil(sampleRate * windowMs / 1000),
+      Math.ceil(sampleRate * activeWindowMs / 1000),
     )
     const minimumSamples = Math.ceil(sampleRate * MIN_ANALYSIS_MS / 1000)
 
@@ -522,9 +540,7 @@ export function useWhisperTriggerRouter({
     )
 
     if (computeRms(silenceCheckSamples) < SILENCE_RMS_THRESHOLD) {
-      setTranscript('')
-      setWindowTranscript('')
-      setTriggerState('idle')
+      syncTriggerState()
       analysisInFlightRef.current = false
 
       if (pendingAnalysisRef.current && isRunningRef.current) {
@@ -568,7 +584,7 @@ export function useWhisperTriggerRouter({
       setWindowTranscript(normalizedTranscript)
 
       if (!normalizedTranscript) {
-        setTriggerState('idle')
+        syncTriggerState()
         return
       }
 
@@ -578,19 +594,51 @@ export function useWhisperTriggerRouter({
         normalizedArming,
         nodes,
       )
+      const latestArmingEvent = [...events]
+        .reverse()
+        .find((event): event is Extract<VoiceEvent, { kind: 'arming' }> => event.kind === 'arming')
+      const uniqueKeywords = [...new Set(events.map((event) => event.keyword))]
 
-      setTriggerState(deriveTriggerState(events, normalizedArming))
+      pushTranscriptHistory(normalizedTranscript, uniqueKeywords, timestamp)
 
-      const match = evaluateTriggerWindow(
-        events,
-        normalizedArming,
-        normalizedTranscript,
-      )
+      let activeArming =
+        armedStateRef.current && armedStateRef.current.expiresAt > timestamp
+          ? armedStateRef.current
+          : null
 
-      if (!match) {
+      if (latestArmingEvent) {
+        activeArming = {
+          expiresAt: timestamp + ARMED_EXPIRY_MS,
+          keyword: latestArmingEvent.keyword,
+        }
+        armedStateRef.current = activeArming
+      } else {
+        armedStateRef.current = activeArming
+      }
+
+      setTriggerState(activeArming ? 'armed' : 'idle')
+
+      if (!activeArming) {
         return
       }
 
+      const targetEvents = events.filter(
+        (event): event is Extract<VoiceEvent, { kind: 'target' }> => event.kind === 'target',
+      )
+      const candidateTargets = latestArmingEvent
+        ? targetEvents.filter((event) => event.orderIndex > latestArmingEvent.orderIndex)
+        : targetEvents
+      const targetEvent = candidateTargets[0]
+
+      if (!targetEvent) {
+        return
+      }
+
+      const match = {
+        keyword: targetEvent.keyword,
+        node: targetEvent.node,
+        transcriptWindow: normalizedTranscript,
+      }
       const lastMatch = lastMatchRef.current
       const isDuplicate =
         lastMatch !== null &&
@@ -607,6 +655,7 @@ export function useWhisperTriggerRouter({
         nodeId: match.node.id,
         timestamp,
       }
+      armedStateRef.current = null
       onMatchRef.current(match)
       setTriggerState('idle')
     } catch {
@@ -656,7 +705,9 @@ export function useWhisperTriggerRouter({
 
     clearAudioBuffer()
     lastMatchRef.current = null
+    armedStateRef.current = null
     setTranscript('')
+    setTranscriptHistory([])
     setWindowTranscript('')
     setTriggerState('idle')
 
@@ -708,6 +759,12 @@ export function useWhisperTriggerRouter({
       analysisIntervalRef.current = window.setInterval(() => {
         void analyzeWindow()
       }, chunkMs)
+
+      window.setTimeout(() => {
+        if (isRunningRef.current) {
+          void analyzeWindow()
+        }
+      }, Math.max(900, Math.min(chunkMs, 1200)))
     } catch {
       stop()
       setError('L acces au microphone a ete bloque.')
@@ -751,6 +808,7 @@ export function useWhisperTriggerRouter({
     stop,
     supported,
     transcript,
+    transcriptHistory,
     triggerState,
     windowTranscript,
   }

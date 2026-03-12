@@ -152,6 +152,25 @@
   color: var(--muted);
 }
 
+.transcript-log {
+  display: grid;
+  gap: 0.5rem;
+  max-height: 14rem;
+  padding-right: 0.15rem;
+  overflow-y: auto;
+}
+
+.panel-transcript {
+  padding: 0.45rem 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.panel-transcript strong {
+  font-weight: 700;
+  color: #ffffff;
+}
+
 .trigger-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -1,4 +1,4 @@
-import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { Fragment, startTransition, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import './App.css'
 import { PresentationStage } from './components/PresentationStage'
 import {
@@ -6,9 +6,9 @@ import {
   presentationNodes,
   speechCommandHints,
 } from './data/scene'
-import { useWhisperTriggerRouter } from './hooks/useWhisperTriggerRouter'
+import { type TranscriptHistoryEntry, useWhisperTriggerRouter } from './hooks/useWhisperTriggerRouter'
 import type { PresentationNode } from './data/scene'
-import { findNodeByIntent, normalizePhrase } from './lib/routing'
+import { findNodeByIntent, findPhrasePositions, normalizePhrase } from './lib/routing'
 
 const overviewKeywords = [
   'overview',
@@ -102,6 +102,73 @@ const voiceCommandTargets: PresentationNode[] = [
     y: -9999,
   },
 ]
+
+function renderHighlightedTranscript(entry: TranscriptHistoryEntry) {
+  const normalizedTranscript = normalizePhrase(entry.transcript)
+
+  if (!normalizedTranscript) {
+    return null
+  }
+
+  const words = normalizedTranscript.split(' ')
+  const occupied = new Array(words.length).fill(false)
+  const highlights = [...new Set(entry.keywords.map((keyword) => normalizePhrase(keyword)).filter(Boolean))]
+    .sort((left, right) => right.split(' ').length - left.split(' ').length)
+    .flatMap((keyword) => {
+      const phraseLength = keyword.split(' ').length
+
+      return findPhrasePositions(normalizedTranscript, keyword).flatMap((position) => {
+        const hasOverlap = Array.from({ length: phraseLength }, (_, offset) => occupied[position + offset]).some(Boolean)
+
+        if (hasOverlap) {
+          return []
+        }
+
+        for (let offset = 0; offset < phraseLength; offset += 1) {
+          occupied[position + offset] = true
+        }
+
+        return [{ position, phraseLength }]
+      })
+    })
+    .sort((left, right) => left.position - right.position)
+
+  if (highlights.length === 0) {
+    return normalizedTranscript
+  }
+
+  const fragments: Array<{ bold: boolean; text: string }> = []
+  let cursor = 0
+
+  highlights.forEach((highlight) => {
+    if (highlight.position > cursor) {
+      fragments.push({
+        bold: false,
+        text: words.slice(cursor, highlight.position).join(' '),
+      })
+    }
+
+    fragments.push({
+      bold: true,
+      text: words.slice(highlight.position, highlight.position + highlight.phraseLength).join(' '),
+    })
+    cursor = highlight.position + highlight.phraseLength
+  })
+
+  if (cursor < words.length) {
+    fragments.push({
+      bold: false,
+      text: words.slice(cursor).join(' '),
+    })
+  }
+
+  return fragments.map((fragment, index) => (
+    <Fragment key={`${entry.id}-${index}`}>
+      {index > 0 ? ' ' : null}
+      {fragment.bold ? <strong>{fragment.text}</strong> : fragment.text}
+    </Fragment>
+  ))
+}
 
 function App() {
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null)
@@ -256,7 +323,7 @@ function App() {
     },
   })
 
-  const deferredTranscript = useDeferredValue(voice.windowTranscript || voice.transcript)
+  const deferredTranscriptHistory = useDeferredValue(voice.transcriptHistory)
 
   useEffect(() => {
     if (!voice.isListening) {
@@ -348,7 +415,17 @@ function App() {
             </span>
           </div>
           <p className="panel-copy">{voice.error ?? lastIntent}</p>
-          <p className="panel-transcript">{deferredTranscript || 'Aucune transcription pour le moment.'}</p>
+          <div className="transcript-log">
+            {deferredTranscriptHistory.length > 0 ? (
+              deferredTranscriptHistory.map((entry) => (
+                <p className="panel-transcript" key={entry.id}>
+                  {renderHighlightedTranscript(entry)}
+                </p>
+              ))
+            ) : (
+              <p className="panel-transcript">Aucune transcription pour le moment.</p>
+            )}
+          </div>
         </section>
 
         <section className="panel-section">
