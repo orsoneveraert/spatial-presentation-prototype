@@ -118,8 +118,7 @@
 }
 
 .control-button:hover:not(:disabled),
-.keyword-card:hover,
-.hub:hover {
+.keyword-card:hover {
   background: rgba(255, 255, 255, 0.06);
   transform: translateY(-1px);
 }
@@ -227,6 +226,7 @@
   position: absolute;
   inset: 0 auto auto 0;
   transform-origin: top left;
+  backface-visibility: hidden;
   will-change: transform;
   transition: transform 1150ms cubic-bezier(0.18, 0.9, 0.16, 1);
 }
@@ -236,8 +236,13 @@
 }
 
 .stage__drift {
-  animation: stage-float 10.8s cubic-bezier(0.42, 0, 0.18, 1) infinite;
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
   will-change: transform;
+}
+
+.stage__drift--floating {
+  animation: stage-float 10.8s cubic-bezier(0.42, 0, 0.18, 1) infinite;
 }
 
 .stage__drift--paused {
@@ -246,6 +251,7 @@
 
 .stage__world {
   position: relative;
+  backface-visibility: hidden;
 }
 
 .stage__wiring {
@@ -253,11 +259,15 @@
   inset: 0;
   width: 100%;
   height: 100%;
+  backface-visibility: hidden;
 }
 
 .stage__line {
   stroke: #ffffff;
   stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  shape-rendering: geometricPrecision;
+  stroke-linecap: square;
 }
 
 .stage__line--active {
@@ -278,6 +288,7 @@
     transform 220ms ease,
     opacity 220ms ease;
   cursor: inherit;
+  backface-visibility: hidden;
 }
 
 .stage__camera--focused .hub {
@@ -302,10 +313,7 @@
     border-color 340ms ease,
     background 340ms ease;
   cursor: inherit;
-}
-
-.frame:hover {
-  transform: translateY(-1px);
+  backface-visibility: hidden;
 }
 
 .stage--dragging .frame:hover,
@@ -338,15 +346,15 @@
   }
 
   25% {
-    transform: translate3d(10px, -8px, 0);
+    transform: translate3d(2px, -2px, 0);
   }
 
   50% {
-    transform: translate3d(0, -14px, 0);
+    transform: translate3d(0, -4px, 0);
   }
 
   75% {
-    transform: translate3d(-10px, -6px, 0);
+    transform: translate3d(-2px, -2px, 0);
   }
 
   100% {

@@ -194,6 +194,7 @@ export function PresentationStage({
   const rawPan = panByView[viewKey] ?? { x: 0, y: 0 }
   const pan = clampPan(rawPan, camera, viewport.width, viewport.height)
   const isDragging = draggingViewKey === viewKey
+  const shouldFloat = !activeNodeId && !isDragging
 
   const stopInertia = useCallback(() => {
     const currentDragState = dragStateRef.current
@@ -454,7 +455,11 @@ export function PresentationStage({
           transform: `translate(${cameraTranslateX}px, ${cameraTranslateY}px) scale(${camera.scale})`,
         }}
       >
-        <div className={`stage__drift ${isDragging ? 'stage__drift--paused' : ''}`}>
+        <div
+          className={`stage__drift ${shouldFloat ? 'stage__drift--floating' : ''} ${
+            isDragging ? 'stage__drift--paused' : ''
+          }`}
+        >
           <div
             className="stage__world"
             style={{
