@@ -7,6 +7,7 @@ import {
   speechCommandHints,
 } from './data/scene'
 import { useWhisperTriggerRouter } from './hooks/useWhisperTriggerRouter'
+import type { PresentationNode } from './data/scene'
 import { findNodeByIntent, normalizePhrase } from './lib/routing'
 
 const overviewKeywords = [
@@ -24,11 +25,55 @@ const overviewKeywords = [
   'recul',
 ]
 
+const nextPageKeywords = [
+  'suivante',
+  'suivant',
+  'prochaine',
+  'prochain',
+  'apres',
+  'après',
+] as const
+
+const previousPageKeywords = [
+  'arriere',
+  'arrière',
+  'precedente',
+  'précédente',
+  'precedent',
+  'précédent',
+] as const
+
+const voiceCommandTargets: PresentationNode[] = [
+  {
+    id: 'command-next-page',
+    eyebrow: '',
+    title: 'Page Suivante',
+    subtitle: '',
+    keywords: [...nextPageKeywords],
+    kind: 'board',
+    pageNumber: '',
+    x: -9999,
+    y: -9999,
+  },
+  {
+    id: 'command-previous-page',
+    eyebrow: '',
+    title: 'Page Arriere',
+    subtitle: '',
+    keywords: [...previousPageKeywords],
+    kind: 'board',
+    pageNumber: '',
+    x: -9999,
+    y: -9999,
+  },
+]
+
 function App() {
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null)
   const [manualCommand, setManualCommand] = useState('')
-  const [lastIntent, setLastIntent] = useState('Dites une forme de "aller" ou "regarder", puis un concept de temps.')
+  const [lastIntent, setLastIntent] = useState('Dites une forme de "aller", "regarder" ou "page", puis un concept de temps ou "suivante / arriere".')
   const [isPanelOpen, setIsPanelOpen] = useState(false)
+  const voiceTargets = [...presentationNodes, ...voiceCommandTargets]
 
   const commitSelection = (nextNodeId: string | null, reason: string) => {
     startTransition(() => {
@@ -36,6 +81,34 @@ function App() {
       setLastIntent(reason)
     })
   }
+
+  const moveSelection = (direction: 'next' | 'previous', reason: string) => {
+    const currentIndex = activeNodeId
+      ? presentationNodes.findIndex((node) => node.id === activeNodeId)
+      : -1
+    const fallbackIndex = direction === 'next' ? 0 : presentationNodes.length - 1
+    const lastIndex = presentationNodes.length - 1
+    const rawNextIndex =
+      currentIndex === -1
+        ? fallbackIndex
+        : currentIndex + (direction === 'next' ? 1 : -1)
+    const nextIndex = Math.max(0, Math.min(lastIndex, rawNextIndex))
+    const nextNode = presentationNodes[nextIndex]
+
+    if (!nextNode) {
+      return
+    }
+
+    if (currentIndex !== -1 && nextIndex === currentIndex) {
+      setLastIntent(direction === 'next' ? 'Derniere page atteinte.' : 'Premiere page atteinte.')
+      return
+    }
+
+    commitSelection(nextNode.id, reason)
+  }
+
+  const matchesOneOf = (intent: string, keywords: readonly string[]) =>
+    keywords.some((keyword) => intent.includes(normalizePhrase(keyword)))
 
   const runIntent = (rawIntent: string) => {
     const normalizedIntent = normalizePhrase(rawIntent)
@@ -46,6 +119,16 @@ function App() {
 
     if (overviewKeywords.some((keyword) => normalizedIntent.includes(keyword))) {
       commitSelection(null, `Commande vocale: ${normalizedIntent}`)
+      return
+    }
+
+    if (normalizedIntent.includes('page') && matchesOneOf(normalizedIntent, nextPageKeywords)) {
+      moveSelection('next', `Commande vocale: ${normalizedIntent}`)
+      return
+    }
+
+    if (normalizedIntent.includes('page') && matchesOneOf(normalizedIntent, previousPageKeywords)) {
+      moveSelection('previous', `Commande vocale: ${normalizedIntent}`)
       return
     }
 
@@ -61,11 +144,21 @@ function App() {
 
   const voice = useWhisperTriggerRouter({
     armingWords: [...frenchTriggerWords],
-    nodes: presentationNodes,
+    nodes: voiceTargets,
     onMatch: ({ keyword, node }) => {
+      if (node.id === 'command-next-page') {
+        moveSelection('next', `WhisperX a entendu une gachette, puis ${keyword}.`)
+        return
+      }
+
+      if (node.id === 'command-previous-page') {
+        moveSelection('previous', `WhisperX a entendu une gachette, puis ${keyword}.`)
+        return
+      }
+
       commitSelection(
         node.id,
-        `WhisperX a entendu une forme de "aller" ou "regarder", puis ${keyword}.`,
+        `WhisperX a entendu une gachette, puis ${keyword}.`,
       )
     },
   })
@@ -136,7 +229,7 @@ function App() {
         <section className="panel-section">
           <p className="eyebrow">Gachette</p>
           <p className="panel-copy">
-            Une seule gachette: toutes les formes de <em>aller</em> et de <em>regarder</em>. Des qu&apos;une forme est entendue, la direction doit arriver dans les 10 secondes.
+            Une seule gachette: toutes les formes de <em>aller</em>, de <em>regarder</em>, plus le mot <em>page</em>. Des qu&apos;une gachette est entendue, la direction doit arriver dans les 10 secondes.
           </p>
           <p className="panel-copy panel-copy--dense">
             {frenchTriggerWords.join(' / ')}
@@ -146,7 +239,7 @@ function App() {
         <section className="panel-section">
           <p className="eyebrow">Direction</p>
           <p className="panel-copy">
-            La gachette expire apres 10 secondes si aucun mot directeur n&apos;arrive.
+            La gachette expire apres 10 secondes si aucun mot directeur n&apos;arrive. Vous pouvez dire un concept de temps, ou bien <em>page suivante</em> / <em>page arriere</em>.
           </p>
         </section>
 
@@ -157,7 +250,7 @@ function App() {
               aria-label="Type a command"
               className="command-input"
               onChange={(event) => setManualCommand(event.target.value)}
-              placeholder='Essayez "regarde aube" ou "ensemble"'
+              placeholder='Essayez "page suivante", "regarde aube" ou "ensemble"'
               value={manualCommand}
             />
             <button className="control-button" type="submit">
@@ -183,6 +276,14 @@ function App() {
             <button className="keyword-card" onClick={() => commitSelection(null, 'Retour a l ensemble.')} type="button">
               <span>Ensemble</span>
               <small>{overviewKeywords.join(' / ')}</small>
+            </button>
+            <button className="keyword-card" onClick={() => moveSelection('next', 'Page suivante depuis le panneau.')} type="button">
+              <span>Page Suivante</span>
+              <small>{nextPageKeywords.join(' / ')}</small>
+            </button>
+            <button className="keyword-card" onClick={() => moveSelection('previous', 'Page arriere depuis le panneau.')} type="button">
+              <span>Page Arriere</span>
+              <small>{previousPageKeywords.join(' / ')}</small>
             </button>
           </div>
         </section>

@@ -17,6 +17,7 @@ export type PresentationNode = {
 }
 
 export const frenchTriggerWords = [
+  'page',
   'aller',
   'vais',
   'vas',
