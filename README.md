@@ -61,14 +61,12 @@ Puis renseigner `VITE_API_BASE_URL`.
 
 ## Deployer le frontend sur GitHub Pages
 
-Le workflow est deja pret dans [.github/workflows/deploy-pages.yml](/Users/orsoneveraert/Documents/Playground/.github/workflows/deploy-pages.yml).
+Le frontend est compatible avec GitHub Pages:
 
-Sur GitHub, active:
+- soit en publiant un build statique sur une branche `gh-pages`
+- soit plus tard via GitHub Actions si tu remets un workflow de deploiement
 
-1. `Settings` -> `Pages` -> `Build and deployment` -> `GitHub Actions`
-2. `Settings` -> `Secrets and variables` -> `Actions` -> `Variables`
-
-Ajoute au minimum:
+Variable frontend minimale:
 
 - `VITE_API_BASE_URL=https://ton-backend-whisperx.example.com`
 
@@ -76,7 +74,7 @@ Optionnel:
 
 - `VITE_BASE_PATH=/` si tu utilises un domaine custom ou une configuration speciale
 
-Si `VITE_BASE_PATH` est vide, le workflow utilise automatiquement `/<nom-du-repo>/` pour un repo Pages standard.
+Si `VITE_BASE_PATH` est vide, Vite utilise automatiquement `/<nom-du-repo>/` pour un repo Pages standard.
 
 ## Deployer le backend WhisperX
 
