@@ -17,7 +17,7 @@ except ImportError:  # pragma: no cover
     whisperx = None
 
 
-MODEL_NAME = os.getenv("WHISPERX_MODEL", "small")
+MODEL_NAME = os.getenv("WHISPERX_MODEL", "large-v3")
 DEVICE = os.getenv("WHISPERX_DEVICE", "cpu")
 COMPUTE_TYPE = os.getenv("WHISPERX_COMPUTE_TYPE", "int8")
 BATCH_SIZE = int(os.getenv("WHISPERX_BATCH_SIZE", "8"))
