@@ -7,6 +7,7 @@
     "dev": "vite",
     "dev:server": "python3.11 -m uvicorn server.main:app --reload --host 127.0.0.1 --port 8000",
     "build": "tsc -b && vite build",
+    "build:pages": "GITHUB_ACTIONS=true GITHUB_REPOSITORY=orsoneveraert/spatial-presentation-prototype VITE_API_BASE_URL=https://mac-mini-de-kety.tailc7e3ac.ts.net:8443 npm run build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
