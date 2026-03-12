@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { apiUrl } from '../config/runtime'
+import { apiUrl, assetUrl } from '../config/runtime'
 import type { PresentationNode } from '../data/scene'
 import { findPhrasePositions, normalizePhrase } from '../lib/routing'
 
@@ -65,7 +65,8 @@ type AudioContextWindow = Window &
 const TARGET_SAMPLE_RATE = 16000
 const MIN_ANALYSIS_MS = 1000
 const SILENCE_CHECK_MS = 1200
-const SILENCE_RMS_THRESHOLD = 0.008
+const SILENCE_RMS_THRESHOLD = 0.004
+const WORKLET_NAME = 'voice-capture-processor'
 
 function getAudioContextConstructor() {
   if (typeof window === 'undefined') {
@@ -323,7 +324,7 @@ async function pingService() {
 
 export function useWhisperTriggerRouter({
   armingWords,
-  chunkMs = 1800,
+  chunkMs = 2100,
   nodes,
   onMatch,
   windowMs = 10000,
@@ -332,6 +333,7 @@ export function useWhisperTriggerRouter({
   const streamRef = useRef<MediaStream | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null)
+  const workletNodeRef = useRef<AudioWorkletNode | null>(null)
   const processorNodeRef = useRef<ScriptProcessorNode | null>(null)
   const sinkNodeRef = useRef<GainNode | null>(null)
   const analysisIntervalRef = useRef<number | null>(null)
@@ -405,11 +407,61 @@ export function useWhisperTriggerRouter({
     trimAudioBuffer()
   }
 
+  const attachScriptProcessor = (
+    audioContext: AudioContext,
+    source: MediaStreamAudioSourceNode,
+    sink: GainNode,
+  ) => {
+    const processor = audioContext.createScriptProcessor(4096, 1, 1)
+
+    processor.onaudioprocess = (event) => {
+      appendAudioSamples(event.inputBuffer.getChannelData(0))
+    }
+
+    source.connect(processor)
+    processor.connect(sink)
+    processorNodeRef.current = processor
+    workletNodeRef.current = null
+  }
+
+  const attachAudioWorklet = async (
+    audioContext: AudioContext,
+    source: MediaStreamAudioSourceNode,
+    sink: GainNode,
+  ) => {
+    await audioContext.audioWorklet.addModule(assetUrl('audio/voice-capture-worklet.js'))
+
+    const workletNode = new AudioWorkletNode(audioContext, WORKLET_NAME, {
+      channelCount: 1,
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+    })
+
+    workletNode.port.onmessage = (event: MessageEvent<{ buffer?: ArrayBuffer; type?: string }>) => {
+      if (event.data?.type !== 'samples' || !event.data.buffer) {
+        return
+      }
+
+      appendAudioSamples(new Float32Array(event.data.buffer))
+    }
+
+    source.connect(workletNode)
+    workletNode.connect(sink)
+    workletNodeRef.current = workletNode
+    processorNodeRef.current = null
+  }
+
   const teardownAudioGraph = () => {
+    if (workletNodeRef.current) {
+      workletNodeRef.current.port.onmessage = null
+      workletNodeRef.current.disconnect()
+    }
+
     processorNodeRef.current?.disconnect()
     sourceNodeRef.current?.disconnect()
     sinkNodeRef.current?.disconnect()
 
+    workletNodeRef.current = null
     processorNodeRef.current = null
     sourceNodeRef.current = null
     sinkNodeRef.current = null
@@ -627,22 +679,24 @@ export function useWhisperTriggerRouter({
       }
 
       const source = audioContext.createMediaStreamSource(stream)
-      const processor = audioContext.createScriptProcessor(4096, 1, 1)
       const sink = audioContext.createGain()
 
       sink.gain.value = 0
-      processor.onaudioprocess = (event) => {
-        appendAudioSamples(event.inputBuffer.getChannelData(0))
-      }
-
-      source.connect(processor)
-      processor.connect(sink)
       sink.connect(audioContext.destination)
+
+      if (typeof AudioWorkletNode !== 'undefined' && audioContext.audioWorklet) {
+        try {
+          await attachAudioWorklet(audioContext, source, sink)
+        } catch {
+          attachScriptProcessor(audioContext, source, sink)
+        }
+      } else {
+        attachScriptProcessor(audioContext, source, sink)
+      }
 
       streamRef.current = stream
       audioContextRef.current = audioContext
       sourceNodeRef.current = source
-      processorNodeRef.current = processor
       sinkNodeRef.current = sink
       sampleRateRef.current = audioContext.sampleRate
       isRunningRef.current = true
