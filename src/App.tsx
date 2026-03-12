@@ -68,13 +68,6 @@ const pageNumberAliases = [
   ['16', ['16', 'seize']],
   ['17', ['17', 'dix sept', 'dix-sept']],
   ['18', ['18', 'dix huit', 'dix-huit']],
-  ['19', ['19', 'dix neuf', 'dix-neuf']],
-  ['20', ['20', 'vingt']],
-  ['21', ['21', 'vingt et un', 'vingt-et-un']],
-  ['22', ['22', 'vingt deux', 'vingt-deux']],
-  ['23', ['23', 'vingt trois', 'vingt-trois']],
-  ['24', ['24', 'vingt quatre', 'vingt-quatre']],
-  ['25', ['25', 'vingt cinq', 'vingt-cinq']],
 ] as const
 
 const pagePhraseToPageNumber = new Map(
@@ -113,7 +106,7 @@ const voiceCommandTargets: PresentationNode[] = [
 function App() {
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null)
   const [manualCommand, setManualCommand] = useState('')
-  const [lastIntent, setLastIntent] = useState('Dites une forme de "aller", "regarder" ou "page", puis un concept, "suivante / arriere", ou "page 18".')
+  const [lastIntent, setLastIntent] = useState('Dites une forme de "aller", "regarder" ou "page", puis un concept comme "page de garde", "sommaire", "pomodoro" ou "page 18".')
   const [isPanelOpen, setIsPanelOpen] = useState(false)
   const lastDirectCommandRef = useRef<{ signature: string; timestamp: number } | null>(null)
   const voiceTargets = useMemo(() => [...presentationNodes, ...voiceCommandTargets], [])
@@ -371,7 +364,7 @@ function App() {
         <section className="panel-section">
           <p className="eyebrow">Direction</p>
           <p className="panel-copy">
-            La gachette expire apres 10 secondes si aucun mot directeur n&apos;arrive. Vous pouvez dire un concept de temps, <em>page suivante</em>, <em>page arriere</em>, <em>va en arriere</em>, <em>de-zoom</em>, <em>prend du recul</em> ou <em>va a la page 18</em>.
+            La gachette expire apres 10 secondes si aucun mot directeur n&apos;arrive. Vous pouvez dire un concept de page comme <em>page de garde</em>, <em>pomodoro</em>, <em>boite a outils</em>, <em>resonance stochastique</em>, ou bien <em>page suivante</em>, <em>page arriere</em>, <em>va en arriere</em>, <em>de-zoom</em>, <em>prend du recul</em> et <em>va a la page 18</em>.
           </p>
         </section>
 
@@ -382,7 +375,7 @@ function App() {
               aria-label="Type a command"
               className="command-input"
               onChange={(event) => setManualCommand(event.target.value)}
-              placeholder='Essayez "page 18", "page suivante", "de-zoom" ou "regarde aube"'
+              placeholder='Essayez "page 18", "page suivante", "de-zoom" ou "regarde page de garde"'
               value={manualCommand}
             />
             <button className="control-button" type="submit">

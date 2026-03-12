@@ -1,3 +1,5 @@
+import { assetUrl } from '../config/runtime'
+
 export type PresentationNode = {
   id: string
   eyebrow: string
@@ -15,7 +17,6 @@ export type PresentationNode = {
 }
 
 type PageBlueprint = Omit<PresentationNode, 'x' | 'y'>
-
 type SpokeKey = 'northWest' | 'north' | 'northEast' | 'southWest' | 'southEast'
 
 export const frenchTriggerWords = [
@@ -121,266 +122,232 @@ export const frenchTriggerWords = [
   'parlez y',
 ] as const
 
-export const WORLD_WIDTH = 5800
-export const WORLD_HEIGHT = 3600
+export const WORLD_WIDTH = 5200
+export const WORLD_HEIGHT = 3200
 export const FRAME_WIDTH = 480
 export const FRAME_HEIGHT = 270
 export const HUB_POINT = { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2 }
 
 const spokeAngles: Record<SpokeKey, number> = {
-  northWest: (-145 * Math.PI) / 180,
-  north: (-90 * Math.PI) / 180,
-  northEast: (-35 * Math.PI) / 180,
-  southWest: (145 * Math.PI) / 180,
-  southEast: (35 * Math.PI) / 180,
+  northWest: (-146 * Math.PI) / 180,
+  north: (-92 * Math.PI) / 180,
+  northEast: (-34 * Math.PI) / 180,
+  southWest: (146 * Math.PI) / 180,
+  southEast: (34 * Math.PI) / 180,
 }
 
-const spokeDepths = [620, 980, 1340, 1700, 2060]
-const spokeOffsets = [-72, -36, 0, 36, 72]
-const verticalCompression = 0.72
+const spokeSequence: SpokeKey[] = ['northWest', 'north', 'northEast', 'southWest', 'southEast']
+const verticalCompression = 0.74
 
-const pageBlueprintsBySpoke: Record<SpokeKey, PageBlueprint[]> = {
-  northWest: [
-    {
-      id: 'signal-field',
-      eyebrow: '01 / North West',
-      title: 'Aube',
-      subtitle: 'Premier temps du cycle.',
-      keywords: ['aube', 'aurore', 'premiere lueur', 'levant'],
-      kind: 'board',
-      pageNumber: '01',
-    },
-    {
-      id: 'matins-choir',
-      eyebrow: '06 / North West',
-      title: 'Matines',
-      subtitle: 'Heure canoniale du matin.',
-      keywords: ['matines', 'premier office', 'chant matinal', 'heure canoniale'],
-      kind: 'board',
-      pageNumber: '06',
-    },
-    {
-      id: 'dew-vector',
-      eyebrow: '07 / North West',
-      title: 'Rosee',
-      subtitle: 'Surface humide avant chaleur.',
-      keywords: ['rosee', 'perles d eau', 'gouttes du matin', 'herbe humide'],
-      kind: 'board',
-      pageNumber: '07',
-    },
-    {
-      id: 'wake-current',
-      eyebrow: '08 / North West',
-      title: 'Eveil',
-      subtitle: 'Sortie franche du sommeil.',
-      keywords: ['eveil', 'sortie du sommeil', 'mise en route', 'premier elan'],
-      kind: 'board',
-      pageNumber: '08',
-    },
-    {
-      id: 'meridian-rest',
-      eyebrow: '09 / North West',
-      title: 'Meridienne',
-      subtitle: 'Pause solaire et heure chaude.',
-      keywords: ['meridienne', 'heure chaude', 'sieste solaire', 'pause solaire'],
-      kind: 'board',
-      pageNumber: '09',
-    },
-  ],
-  north: [
-    {
-      id: 'context-grid',
-      eyebrow: '02 / North',
-      title: 'Zenith',
-      subtitle: 'Plein jour et point haut.',
-      keywords: ['zenith', 'point haut', 'apogee solaire', 'midi absolu'],
-      kind: 'board',
-      pageNumber: '02',
-    },
-    {
-      id: 'afterglow-plane',
-      eyebrow: '10 / North',
-      title: 'Apres-midi',
-      subtitle: 'Jour avance sans rupture.',
-      keywords: ['apres midi', 'apresmidi', 'jour avance', 'seconde lumiere'],
-      kind: 'board',
-      pageNumber: '10',
-    },
-    {
-      id: 'falling-light',
-      eyebrow: '11 / North',
-      title: 'Declin',
-      subtitle: 'La lumiere commence a pencher.',
-      keywords: ['declin', 'jour qui penche', 'lumiere descendante', 'heure oblique'],
-      kind: 'board',
-      pageNumber: '11',
-    },
-    {
-      id: 'vesper-index',
-      eyebrow: '12 / North',
-      title: 'Vepres',
-      subtitle: 'Office du soir et bascule lente.',
-      keywords: ['vepres', 'office du soir', 'heure vesperale', 'vesperal'],
-      kind: 'board',
-      pageNumber: '12',
-    },
-    {
-      id: 'late-watch',
-      eyebrow: '13 / North',
-      title: 'Veillee',
-      subtitle: 'Feu tardif avant la nuit pleine.',
-      keywords: ['veillee', 'feu tardif', 'soir tard', 'heure veilleuse'],
-      kind: 'board',
-      pageNumber: '13',
-    },
-  ],
-  northEast: [
-    {
-      id: 'motion-reel',
-      eyebrow: '03 / North East',
-      title: 'Crepuscule',
-      subtitle: 'Bascule vers le soir.',
-      keywords: ['crepuscule', 'entre chien et loup', 'brune', 'tombee du jour'],
-      kind: 'board',
-      pageNumber: '03',
-    },
-    {
-      id: 'night-score',
-      eyebrow: '14 / North East',
-      title: 'Nocturne',
-      subtitle: 'Paysage sonore de nuit.',
-      keywords: ['nocturne', 'ombre musicale', 'nuit chantee', 'tableau nocturne'],
-      kind: 'board',
-      pageNumber: '14',
-    },
-    {
-      id: 'sleep-break',
-      eyebrow: '15 / North East',
-      title: 'Insomnie',
-      subtitle: 'Temps casse au milieu du repos.',
-      keywords: ['insomnie', 'nuit blanche', 'yeux ouverts', 'sommeil casse'],
-      kind: 'board',
-      pageNumber: '15',
-    },
-    {
-      id: 'dream-basin',
-      eyebrow: '16 / North East',
-      title: 'Songe',
-      subtitle: 'Scene interieure sans horloge.',
-      keywords: ['songe', 'reve profond', 'vision dormante', 'pays du reve'],
-      kind: 'board',
-      pageNumber: '16',
-    },
-    {
-      id: 'material-study',
-      eyebrow: '04 / North East',
-      title: 'Minuit',
-      subtitle: 'Nuit dense et heure noire.',
-      keywords: ['minuit', 'douze coups', 'milieu nocturne', 'heure zero de nuit'],
-      kind: 'board',
-      pageNumber: '04',
-    },
-  ],
-  southWest: [
-    {
-      id: 'mist-layer',
-      eyebrow: '17 / South West',
-      title: 'Brume',
-      subtitle: 'Voile pale et temps suspendu.',
-      keywords: ['brume', 'voile pale', 'brouillard leger', 'air laiteux'],
-      kind: 'board',
-      pageNumber: '17',
-    },
-    {
-      id: 'underpoint',
-      eyebrow: '18 / South West',
-      title: 'Nadir',
-      subtitle: 'Point bas du repere temporel.',
-      keywords: ['nadir', 'point bas', 'contre zenith', 'fond du ciel'],
-      kind: 'board',
-      pageNumber: '18',
-    },
-    {
-      id: 'equal-turn',
-      eyebrow: '19 / South West',
-      title: 'Equinoxe',
-      subtitle: 'Equilibre exact entre jour et nuit.',
-      keywords: ['equinoxe', 'egal jour nuit', 'bascule egale', 'equilibre solaire'],
-      kind: 'board',
-      pageNumber: '19',
-    },
-    {
-      id: 'season-pivot',
-      eyebrow: '20 / South West',
-      title: 'Solstice',
-      subtitle: 'Pivot lumineux des saisons.',
-      keywords: ['solstice', 'pivot de saison', 'long jour', 'nuit la plus longue'],
-      kind: 'board',
-      pageNumber: '20',
-    },
-    {
-      id: 'quarter-wheel',
-      eyebrow: '21 / South West',
-      title: 'Saison',
-      subtitle: 'Grande boucle qui recadre l annee.',
-      keywords: ['saison', 'quart de l an', 'cycle saisonnier', 'ronde des mois'],
-      kind: 'board',
-      pageNumber: '21',
-    },
-  ],
-  southEast: [
-    {
-      id: 'tide-trace',
-      eyebrow: '22 / South East',
-      title: 'Maree',
-      subtitle: 'Temps marin et flux periodique.',
-      keywords: ['maree', 'flux et reflux', 'heure marine', 'montante'],
-      kind: 'board',
-      pageNumber: '22',
-    },
-    {
-      id: 'loop-archive',
-      eyebrow: '23 / South East',
-      title: 'Cycle',
-      subtitle: 'Retour complet d un motif temporel.',
-      keywords: ['cycle', 'tour complet', 'retour periodique', 'boucle du temps'],
-      kind: 'board',
-      pageNumber: '23',
-    },
-    {
-      id: 'breathing-gap',
-      eyebrow: '24 / South East',
-      title: 'Intervalle',
-      subtitle: 'Entre-temps net et decoupant.',
-      keywords: ['intervalle', 'entre temps', 'parenthese temporelle', 'temps suspendu'],
-      kind: 'board',
-      pageNumber: '24',
-    },
-    {
-      id: 'time-trace',
-      eyebrow: '25 / South East',
-      title: 'Memoire',
-      subtitle: 'Trace durable laissee par le temps.',
-      keywords: ['memoire', 'trace du temps', 'archive vive', 'souvenir durable'],
-      kind: 'board',
-      pageNumber: '25',
-    },
-    {
-      id: 'closing-frame',
-      eyebrow: '05 / South East',
-      title: 'Eternite',
-      subtitle: 'Temps sans bord.',
-      keywords: ['eternite', 'hors du temps', 'sans fin', 'infini calme'],
-      kind: 'board',
-      pageNumber: '05',
-    },
-  ],
+const depthPresetsByCount: Record<number, number[]> = {
+  1: [980],
+  2: [760, 1280],
+  3: [640, 1040, 1440],
+  4: [560, 920, 1280, 1640],
+  5: [520, 860, 1200, 1540, 1880],
 }
 
-function positionOnSpoke(spoke: SpokeKey, depthIndex: number) {
+const offsetPresetsByCount: Record<number, number[]> = {
+  1: [0],
+  2: [-18, 18],
+  3: [-44, 0, 44],
+  4: [-72, -24, 24, 72],
+  5: [-96, -48, 0, 48, 96],
+}
+
+function pageSource(pageNumber: string) {
+  return assetUrl(`media/psychodesign-remise/page-${pageNumber}.png`)
+}
+
+const pageBlueprints: PageBlueprint[] = [
+  {
+    id: 'page-01-psychodesign',
+    eyebrow: '01 / Cover',
+    title: 'Psychodesign',
+    subtitle: 'Page de garde et manifeste du projet.',
+    keywords: ['page de garde', 'premiere de couverture', 'frontispice', 'ouverture du deck'],
+    kind: 'image',
+    pageNumber: '01',
+    source: pageSource('01'),
+  },
+  {
+    id: 'page-02-prevalence',
+    eyebrow: '02 / Intro',
+    title: 'Prevalence ADHD',
+    subtitle: 'Constat statistique d entree.',
+    keywords: ['prevalence adhd', 'trois pour cent', 'statistique mondiale', 'chiffre cle'],
+    kind: 'image',
+    pageNumber: '02',
+    source: pageSource('02'),
+  },
+  {
+    id: 'page-03-sommaire',
+    eyebrow: '03 / Map',
+    title: 'Sommaire',
+    subtitle: 'Table d entree des douze pistes.',
+    keywords: ['sommaire', 'table des matieres', 'table des contenus', 'plan des idees'],
+    kind: 'image',
+    pageNumber: '03',
+    source: pageSource('03'),
+  },
+  {
+    id: 'page-04-cecite-temporelle',
+    eyebrow: '04 / Time Passing',
+    title: 'Cecite Temporelle',
+    subtitle: 'Temps ecoule et lecture analogique.',
+    keywords: ['cecite temporelle', 'temps ecoule', 'derive horaire', 'horloge analogique'],
+    kind: 'image',
+    pageNumber: '04',
+    source: pageSource('04'),
+  },
+  {
+    id: 'page-05-clochers-pomodoro',
+    eyebrow: '05 / Bells',
+    title: 'Clochers et Pomodoro',
+    subtitle: 'Les cloches comme metronome social.',
+    keywords: ['clochers', 'pomodoro', 'metronome social', 'sonnerie civile'],
+    kind: 'image',
+    pageNumber: '05',
+    source: pageSource('05'),
+  },
+  {
+    id: 'page-06-time-timer',
+    eyebrow: '06 / Domestic Timer',
+    title: 'Minuteur Visuel',
+    subtitle: 'Un time timer transpose au foyer.',
+    keywords: ['minuteur visuel', 'timer domestique', 'cadreur de duree', 'compte a rebours'],
+    kind: 'image',
+    pageNumber: '06',
+    source: pageSource('06'),
+  },
+  {
+    id: 'page-07-horloge-gare',
+    eyebrow: '07 / Station Clock',
+    title: 'Horloge de Gare',
+    subtitle: 'Lecture LED en temps de rush.',
+    keywords: ['horloge de gare', 'quai led', 'affichage lumineux', 'lecture express'],
+    kind: 'image',
+    pageNumber: '07',
+    source: pageSource('07'),
+  },
+  {
+    id: 'page-08-parcours-regard',
+    eyebrow: '08 / Gaze Plotting',
+    title: 'Parcours du Regard',
+    subtitle: 'Observer les traces oculaires du design.',
+    keywords: ['parcours du regard', 'trace oculaire', 'cartographie visuelle', 'oculometrie'],
+    kind: 'image',
+    pageNumber: '08',
+    source: pageSource('08'),
+  },
+  {
+    id: 'page-09-propagande-temps',
+    eyebrow: '09 / Time Propaganda',
+    title: 'Propagande du Temps',
+    subtitle: 'Rythmes neurotypiques et contraintes horaire.',
+    keywords: ['propagande temporelle', 'horaire normatif', 'temps prescrit', 'agenda disciplinaire'],
+    kind: 'image',
+    pageNumber: '09',
+    source: pageSource('09'),
+  },
+  {
+    id: 'page-10-patterns',
+    eyebrow: '10 / Design Patterns',
+    title: 'Patrons de Design',
+    subtitle: 'Liste de principes materiels et d usage.',
+    keywords: ['patrons de design', 'motifs d usage', 'tactilite', 'wabi sabi'],
+    kind: 'image',
+    pageNumber: '10',
+    source: pageSource('10'),
+  },
+  {
+    id: 'page-11-energie-facilite',
+    eyebrow: '11 / Pattern Studies',
+    title: 'Energie et Facilite',
+    subtitle: 'Deux planches de recherche sur l effort.',
+    keywords: ['energie utile', 'facilite d acces', 'deploiement simple', 'effort moindre'],
+    kind: 'image',
+    pageNumber: '11',
+    source: pageSource('11'),
+  },
+  {
+    id: 'page-12-empilage-etapes',
+    eyebrow: '12 / Pattern Studies',
+    title: 'Empilage et Etapes',
+    subtitle: 'Stackable et few steps en etudes.',
+    keywords: ['empilage', 'peu d etapes', 'superposition', 'chemin court'],
+    kind: 'image',
+    pageNumber: '12',
+    source: pageSource('12'),
+  },
+  {
+    id: 'page-13-orientation',
+    eyebrow: '13 / Pattern Studies',
+    title: 'Orientation',
+    subtitle: 'Direction et composition guidee.',
+    keywords: ['orientation', 'vecteurs', 'boussole', 'ramification'],
+    kind: 'image',
+    pageNumber: '13',
+    source: pageSource('13'),
+  },
+  {
+    id: 'page-14-outils-adhd',
+    eyebrow: '14 / Tool Atlas',
+    title: 'Outils ADHD',
+    subtitle: 'Une interface de categories et d aides.',
+    keywords: ['boite a outils', 'catalogue d aides', 'interface de soutien', 'trousse adhd'],
+    kind: 'image',
+    pageNumber: '14',
+    source: pageSource('14'),
+  },
+  {
+    id: 'page-15-bidouille',
+    eyebrow: '15 / Life Modding',
+    title: 'Bidouille du Quotidien',
+    subtitle: 'Life modding et protheses du geste.',
+    keywords: ['bidouille du quotidien', 'prothese textile', 'ajustement vital', 'bricolage de vie'],
+    kind: 'image',
+    pageNumber: '15',
+    source: pageSource('15'),
+  },
+  {
+    id: 'page-16-rhomboide',
+    eyebrow: '16 / Rhombus Model',
+    title: 'Modele Rhomboide',
+    subtitle: 'Objectif final, sous-buts et distractions.',
+    keywords: ['modele rhomboide', 'objectif final', 'sous buts', 'parasites'],
+    kind: 'image',
+    pageNumber: '16',
+    source: pageSource('16'),
+  },
+  {
+    id: 'page-17-resonance',
+    eyebrow: '17 / Beat Finder',
+    title: 'Resonance Sonore',
+    subtitle: 'Le bruit benefique pour retrouver le focus.',
+    keywords: ['resonance stochastique', 'bruit benefique', 'pulsation', 'calage sonore'],
+    kind: 'image',
+    pageNumber: '17',
+    source: pageSource('17'),
+  },
+  {
+    id: 'page-18-geospatial',
+    eyebrow: '18 / Geospatial Loss',
+    title: 'Memoire Geospatiale',
+    subtitle: 'Perte de trajectoire et reperes spatiaux.',
+    keywords: ['amnesie spatiale', 'trajet perdu', 'repere geographique', 'memoire de route'],
+    kind: 'image',
+    pageNumber: '18',
+    source: pageSource('18'),
+  },
+]
+
+function positionOnSpoke(spoke: SpokeKey, depthIndex: number, itemCount: number) {
   const angle = spokeAngles[spoke]
-  const radius = spokeDepths[depthIndex]
-  const offset = spokeOffsets[depthIndex]
+  const depths = depthPresetsByCount[itemCount]
+  const offsets = offsetPresetsByCount[itemCount]
+  const radius = depths?.[depthIndex] ?? 980
+  const offset = offsets?.[depthIndex] ?? 0
   const perpendicularAngle = angle + Math.PI / 2
   const centerX =
     HUB_POINT.x +
@@ -397,20 +364,29 @@ function positionOnSpoke(spoke: SpokeKey, depthIndex: number) {
   }
 }
 
-export const presentationNodes: PresentationNode[] = (
-  Object.entries(pageBlueprintsBySpoke) as [SpokeKey, PageBlueprint[]][]
-).flatMap(([spoke, spokePages]) =>
-  spokePages.map((page, depthIndex) => ({
-    ...page,
-    ...positionOnSpoke(spoke, depthIndex),
-  })),
-).sort((left, right) => Number(left.pageNumber) - Number(right.pageNumber))
+function distributeAcrossSpokes(pages: PageBlueprint[]) {
+  const baseCount = Math.floor(pages.length / spokeSequence.length)
+  const remainder = pages.length % spokeSequence.length
+  let cursor = 0
 
-export const speechCommandHints = [...presentationNodes]
+  return spokeSequence.flatMap((spoke, spokeIndex) => {
+    const itemCount = baseCount + (spokeIndex < remainder ? 1 : 0)
+    const spokePages = pages.slice(cursor, cursor + itemCount)
+    cursor += itemCount
+
+    return spokePages.map((page, depthIndex) => ({
+      ...page,
+      ...positionOnSpoke(spoke, depthIndex, itemCount),
+    }))
+  })
+}
+
+export const presentationNodes: PresentationNode[] = distributeAcrossSpokes(pageBlueprints)
   .sort((left, right) => Number(left.pageNumber) - Number(right.pageNumber))
-  .map((node) => ({
-    nodeId: node.id,
-    label: `p.${node.pageNumber} ${node.title}`,
-    keywords: node.keywords,
-    pageNumber: node.pageNumber,
-  }))
+
+export const speechCommandHints = presentationNodes.map((node) => ({
+  nodeId: node.id,
+  label: `p.${node.pageNumber} ${node.title}`,
+  keywords: node.keywords,
+  pageNumber: node.pageNumber,
+}))

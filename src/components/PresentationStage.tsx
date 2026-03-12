@@ -78,8 +78,8 @@ function computeCamera(
   }
 
   const focusScale = Math.min(
-    (viewportWidth * 0.968) / FRAME_WIDTH,
-    (viewportHeight * 0.932) / FRAME_HEIGHT,
+    (viewportWidth * 1.018) / FRAME_WIDTH,
+    (viewportHeight * 1.018) / FRAME_HEIGHT,
   )
   const nodeCenterX = activeNode.x + FRAME_WIDTH / 2
   const nodeCenterY = activeNode.y + FRAME_HEIGHT / 2
@@ -509,6 +509,16 @@ export function PresentationStage({
                   aria-label={node.title}
                   type="button"
                 >
+                  {node.source ? (
+                    <img
+                      alt=""
+                      className="frame__media"
+                      decoding="async"
+                      draggable={false}
+                      loading={isActive ? 'eager' : 'lazy'}
+                      src={node.source}
+                    />
+                  ) : null}
                   <span aria-hidden="true" className="frame__page-number">
                     {`p.${node.pageNumber}`}
                   </span>
