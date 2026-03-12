@@ -49,30 +49,41 @@ const previousPageKeywords = [
   'précédent',
 ] as const
 
-const pageTokenToPageNumber: Record<string, string> = {
-  '1': '01',
-  '01': '01',
-  un: '01',
-  une: '01',
-  premier: '01',
-  premiere: '01',
-  '2': '02',
-  '02': '02',
-  deux: '02',
-  second: '02',
-  seconde: '02',
-  '3': '03',
-  '03': '03',
-  trois: '03',
-  '4': '04',
-  '04': '04',
-  quatre: '04',
-  '5': '05',
-  '05': '05',
-  cinq: '05',
-}
+const pageNumberAliases = [
+  ['01', ['1', '01', 'un', 'une', 'premier', 'premiere']],
+  ['02', ['2', '02', 'deux', 'second', 'seconde']],
+  ['03', ['3', '03', 'trois']],
+  ['04', ['4', '04', 'quatre']],
+  ['05', ['5', '05', 'cinq']],
+  ['06', ['6', '06', 'six']],
+  ['07', ['7', '07', 'sept']],
+  ['08', ['8', '08', 'huit']],
+  ['09', ['9', '09', 'neuf']],
+  ['10', ['10', 'dix']],
+  ['11', ['11', 'onze']],
+  ['12', ['12', 'douze']],
+  ['13', ['13', 'treize']],
+  ['14', ['14', 'quatorze']],
+  ['15', ['15', 'quinze']],
+  ['16', ['16', 'seize']],
+  ['17', ['17', 'dix sept', 'dix-sept']],
+  ['18', ['18', 'dix huit', 'dix-huit']],
+  ['19', ['19', 'dix neuf', 'dix-neuf']],
+  ['20', ['20', 'vingt']],
+  ['21', ['21', 'vingt et un', 'vingt-et-un']],
+  ['22', ['22', 'vingt deux', 'vingt-deux']],
+  ['23', ['23', 'vingt trois', 'vingt-trois']],
+  ['24', ['24', 'vingt quatre', 'vingt-quatre']],
+  ['25', ['25', 'vingt cinq', 'vingt-cinq']],
+] as const
 
-const pageTokenFillers = new Set(['la', 'le', 'les', 'numero', 'numero', 'num', 'n', 'no'])
+const pagePhraseToPageNumber = new Map(
+  pageNumberAliases.flatMap(([pageNumber, aliases]) =>
+    aliases.map((alias) => [normalizePhrase(alias).replace(/-/g, ' '), pageNumber] as const),
+  ),
+)
+
+const pageTokenFillers = new Set(['la', 'le', 'les', 'numero', 'num', 'n', 'no', 'de', 'du'])
 
 const voiceCommandTargets: PresentationNode[] = [
   {
@@ -102,7 +113,7 @@ const voiceCommandTargets: PresentationNode[] = [
 function App() {
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null)
   const [manualCommand, setManualCommand] = useState('')
-  const [lastIntent, setLastIntent] = useState('Dites une forme de "aller", "regarder" ou "page", puis un concept, "suivante / arriere", ou "page 3".')
+  const [lastIntent, setLastIntent] = useState('Dites une forme de "aller", "regarder" ou "page", puis un concept, "suivante / arriere", ou "page 18".')
   const [isPanelOpen, setIsPanelOpen] = useState(false)
   const lastDirectCommandRef = useRef<{ signature: string; timestamp: number } | null>(null)
   const voiceTargets = useMemo(() => [...presentationNodes, ...voiceCommandTargets], [])
@@ -143,24 +154,30 @@ function App() {
     keywords.some((keyword) => intent.includes(normalizePhrase(keyword)))
 
   const findNodeByPageReference = (intent: string) => {
-    const words = intent.split(' ').filter(Boolean)
+    const words = intent.replace(/-/g, ' ').split(' ').filter(Boolean)
 
     for (let index = 0; index < words.length; index += 1) {
       if (words[index] !== 'page') {
         continue
       }
 
-      for (let cursor = index + 1; cursor < Math.min(words.length, index + 4); cursor += 1) {
+      const referenceWords: string[] = []
+
+      for (let cursor = index + 1; cursor < words.length && referenceWords.length < 4; cursor += 1) {
         const token = words[cursor]
 
         if (pageTokenFillers.has(token)) {
           continue
         }
 
-        const pageNumber = pageTokenToPageNumber[token]
+        referenceWords.push(token)
+      }
+
+      for (let length = Math.min(referenceWords.length, 4); length >= 1; length -= 1) {
+        const pageNumber = pagePhraseToPageNumber.get(referenceWords.slice(0, length).join(' '))
 
         if (!pageNumber) {
-          break
+          continue
         }
 
         return presentationNodes.find((node) => node.pageNumber === pageNumber) ?? null
@@ -354,7 +371,7 @@ function App() {
         <section className="panel-section">
           <p className="eyebrow">Direction</p>
           <p className="panel-copy">
-            La gachette expire apres 10 secondes si aucun mot directeur n&apos;arrive. Vous pouvez dire un concept de temps, <em>page suivante</em>, <em>page arriere</em>, <em>va en arriere</em>, <em>de-zoom</em>, <em>prend du recul</em> ou <em>va a la page 3</em>.
+            La gachette expire apres 10 secondes si aucun mot directeur n&apos;arrive. Vous pouvez dire un concept de temps, <em>page suivante</em>, <em>page arriere</em>, <em>va en arriere</em>, <em>de-zoom</em>, <em>prend du recul</em> ou <em>va a la page 18</em>.
           </p>
         </section>
 
@@ -365,7 +382,7 @@ function App() {
               aria-label="Type a command"
               className="command-input"
               onChange={(event) => setManualCommand(event.target.value)}
-              placeholder='Essayez "page 3", "page suivante", "de-zoom" ou "regarde aube"'
+              placeholder='Essayez "page 18", "page suivante", "de-zoom" ou "regarde aube"'
               value={manualCommand}
             />
             <button className="control-button" type="submit">
