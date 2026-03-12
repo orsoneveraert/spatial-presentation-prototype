@@ -11,6 +11,7 @@ export type PresentationNode = {
   x: number
   y: number
   source?: string
+  focusSource?: string
   pageLabel?: string
   imageLabel?: string
   boardLabel?: string
@@ -155,8 +156,11 @@ const offsetPresetsByCount: Record<number, number[]> = {
   5: [-96, -48, 0, 48, 96],
 }
 
-function pageSource(pageNumber: string) {
-  return assetUrl(`media/psychodesign-remise/page-${pageNumber}.png`)
+function pageSources(pageNumber: string) {
+  return {
+    source: assetUrl(`media/psychodesign-remise/page-${pageNumber}.png`),
+    focusSource: assetUrl(`media/psychodesign-remise-hd/page-${pageNumber}.png`),
+  }
 }
 
 const pageBlueprints: PageBlueprint[] = [
@@ -168,7 +172,7 @@ const pageBlueprints: PageBlueprint[] = [
     keywords: ['page de garde', 'premiere de couverture', 'frontispice', 'ouverture du deck'],
     kind: 'image',
     pageNumber: '01',
-    source: pageSource('01'),
+    ...pageSources('01'),
   },
   {
     id: 'page-02-prevalence',
@@ -178,7 +182,7 @@ const pageBlueprints: PageBlueprint[] = [
     keywords: ['prevalence adhd', 'trois pour cent', 'statistique mondiale', 'chiffre cle'],
     kind: 'image',
     pageNumber: '02',
-    source: pageSource('02'),
+    ...pageSources('02'),
   },
   {
     id: 'page-03-sommaire',
@@ -188,7 +192,7 @@ const pageBlueprints: PageBlueprint[] = [
     keywords: ['sommaire', 'table des matieres', 'table des contenus', 'plan des idees'],
     kind: 'image',
     pageNumber: '03',
-    source: pageSource('03'),
+    ...pageSources('03'),
   },
   {
     id: 'page-04-cecite-temporelle',
@@ -198,7 +202,7 @@ const pageBlueprints: PageBlueprint[] = [
     keywords: ['cecite temporelle', 'temps ecoule', 'derive horaire', 'horloge analogique'],
     kind: 'image',
     pageNumber: '04',
-    source: pageSource('04'),
+    ...pageSources('04'),
   },
   {
     id: 'page-05-clochers-pomodoro',
@@ -208,7 +212,7 @@ const pageBlueprints: PageBlueprint[] = [
     keywords: ['clochers', 'pomodoro', 'metronome social', 'sonnerie civile'],
     kind: 'image',
     pageNumber: '05',
-    source: pageSource('05'),
+    ...pageSources('05'),
   },
   {
     id: 'page-06-time-timer',
@@ -218,7 +222,7 @@ const pageBlueprints: PageBlueprint[] = [
     keywords: ['minuteur visuel', 'timer domestique', 'cadreur de duree', 'compte a rebours'],
     kind: 'image',
     pageNumber: '06',
-    source: pageSource('06'),
+    ...pageSources('06'),
   },
   {
     id: 'page-07-horloge-gare',
@@ -228,7 +232,7 @@ const pageBlueprints: PageBlueprint[] = [
     keywords: ['horloge de gare', 'quai led', 'affichage lumineux', 'lecture express'],
     kind: 'image',
     pageNumber: '07',
-    source: pageSource('07'),
+    ...pageSources('07'),
   },
   {
     id: 'page-08-parcours-regard',
@@ -238,7 +242,7 @@ const pageBlueprints: PageBlueprint[] = [
     keywords: ['parcours du regard', 'trace oculaire', 'cartographie visuelle', 'oculometrie'],
     kind: 'image',
     pageNumber: '08',
-    source: pageSource('08'),
+    ...pageSources('08'),
   },
   {
     id: 'page-09-propagande-temps',
@@ -248,7 +252,7 @@ const pageBlueprints: PageBlueprint[] = [
     keywords: ['propagande temporelle', 'horaire normatif', 'temps prescrit', 'agenda disciplinaire'],
     kind: 'image',
     pageNumber: '09',
-    source: pageSource('09'),
+    ...pageSources('09'),
   },
   {
     id: 'page-10-patterns',
@@ -258,7 +262,7 @@ const pageBlueprints: PageBlueprint[] = [
     keywords: ['patrons de design', 'motifs d usage', 'tactilite', 'wabi sabi'],
     kind: 'image',
     pageNumber: '10',
-    source: pageSource('10'),
+    ...pageSources('10'),
   },
   {
     id: 'page-11-energie-facilite',
@@ -268,7 +272,7 @@ const pageBlueprints: PageBlueprint[] = [
     keywords: ['energie utile', 'facilite d acces', 'deploiement simple', 'effort moindre'],
     kind: 'image',
     pageNumber: '11',
-    source: pageSource('11'),
+    ...pageSources('11'),
   },
   {
     id: 'page-12-empilage-etapes',
@@ -278,7 +282,7 @@ const pageBlueprints: PageBlueprint[] = [
     keywords: ['empilage', 'peu d etapes', 'superposition', 'chemin court'],
     kind: 'image',
     pageNumber: '12',
-    source: pageSource('12'),
+    ...pageSources('12'),
   },
   {
     id: 'page-13-orientation',
@@ -288,7 +292,7 @@ const pageBlueprints: PageBlueprint[] = [
     keywords: ['orientation', 'vecteurs', 'boussole', 'ramification'],
     kind: 'image',
     pageNumber: '13',
-    source: pageSource('13'),
+    ...pageSources('13'),
   },
   {
     id: 'page-14-outils-adhd',
@@ -298,7 +302,7 @@ const pageBlueprints: PageBlueprint[] = [
     keywords: ['boite a outils', 'catalogue d aides', 'interface de soutien', 'trousse adhd'],
     kind: 'image',
     pageNumber: '14',
-    source: pageSource('14'),
+    ...pageSources('14'),
   },
   {
     id: 'page-15-bidouille',
@@ -308,7 +312,7 @@ const pageBlueprints: PageBlueprint[] = [
     keywords: ['bidouille du quotidien', 'prothese textile', 'ajustement vital', 'bricolage de vie'],
     kind: 'image',
     pageNumber: '15',
-    source: pageSource('15'),
+    ...pageSources('15'),
   },
   {
     id: 'page-16-rhomboide',
@@ -318,7 +322,7 @@ const pageBlueprints: PageBlueprint[] = [
     keywords: ['modele rhomboide', 'objectif final', 'sous buts', 'parasites'],
     kind: 'image',
     pageNumber: '16',
-    source: pageSource('16'),
+    ...pageSources('16'),
   },
   {
     id: 'page-17-resonance',
@@ -328,7 +332,7 @@ const pageBlueprints: PageBlueprint[] = [
     keywords: ['resonance stochastique', 'bruit benefique', 'pulsation', 'calage sonore'],
     kind: 'image',
     pageNumber: '17',
-    source: pageSource('17'),
+    ...pageSources('17'),
   },
   {
     id: 'page-18-geospatial',
@@ -338,7 +342,7 @@ const pageBlueprints: PageBlueprint[] = [
     keywords: ['amnesie spatiale', 'trajet perdu', 'repere geographique', 'memoire de route'],
     kind: 'image',
     pageNumber: '18',
-    source: pageSource('18'),
+    ...pageSources('18'),
   },
 ]
 

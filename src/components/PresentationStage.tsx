@@ -515,8 +515,9 @@ export function PresentationStage({
                       className="frame__media"
                       decoding="async"
                       draggable={false}
+                      fetchPriority={isActive ? 'high' : 'low'}
                       loading={isActive ? 'eager' : 'lazy'}
-                      src={node.source}
+                      src={isActive && node.focusSource ? node.focusSource : node.source}
                     />
                   ) : null}
                   <span aria-hidden="true" className="frame__page-number">

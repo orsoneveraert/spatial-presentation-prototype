@@ -260,6 +260,7 @@
   width: 100%;
   height: 100%;
   backface-visibility: hidden;
+  transition: opacity 240ms ease;
 }
 
 .stage__line {
@@ -292,7 +293,8 @@
 }
 
 .stage__camera--focused .hub {
-  opacity: 0.58;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .hub__core {
@@ -307,12 +309,14 @@
   width: 480px;
   height: 270px;
   overflow: hidden;
+  z-index: 1;
   border: 1px solid #ffffff;
   background: #000000;
   transition:
     transform 260ms ease,
     border-color 340ms ease,
-    background 340ms ease;
+    background 340ms ease,
+    opacity 220ms ease;
   cursor: inherit;
   backface-visibility: hidden;
 }
@@ -334,6 +338,7 @@
 
 .frame--active {
   border-color: #ffffff;
+  z-index: 6;
 }
 
 .stage__camera--focused .frame--active {
@@ -342,6 +347,15 @@
 
 .frame--dimmed {
   opacity: 1;
+}
+
+.stage__camera--focused .frame--dimmed {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.stage__camera--focused .stage__wiring {
+  opacity: 0;
 }
 
 .frame__page-number {
@@ -356,6 +370,10 @@
   line-height: 1;
   font-weight: 500;
   letter-spacing: -0.03em;
+}
+
+.stage__camera--focused .frame__page-number {
+  opacity: 0;
 }
 
 @keyframes stage-float {
