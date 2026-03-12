@@ -22,6 +22,7 @@ DEVICE = os.getenv("WHISPERX_DEVICE", "cpu")
 COMPUTE_TYPE = os.getenv("WHISPERX_COMPUTE_TYPE", "int8")
 BATCH_SIZE = int(os.getenv("WHISPERX_BATCH_SIZE", "8"))
 ENABLE_ALIGNMENT = os.getenv("WHISPERX_ENABLE_ALIGNMENT", "false").lower() == "true"
+TRANSCRIBE_LANGUAGE = os.getenv("WHISPERX_LANGUAGE", "fr").strip().lower() or "fr"
 ALLOW_ORIGINS = [
     origin.strip()
     for origin in os.getenv("WHISPERX_ALLOW_ORIGINS", "*").split(",")
@@ -69,7 +70,11 @@ class WhisperXService:
     def transcribe_file(self, audio_path: Path) -> dict[str, Any]:
         model = self.ensure_model()
         audio = whisperx.load_audio(str(audio_path))
-        result = model.transcribe(audio, batch_size=BATCH_SIZE)
+        result = model.transcribe(
+            audio,
+            batch_size=BATCH_SIZE,
+            language=TRANSCRIBE_LANGUAGE,
+        )
 
         if ENABLE_ALIGNMENT and whisperx is not None:
             language = result.get("language")
@@ -119,6 +124,7 @@ def health() -> dict[str, Any]:
     return {
         "ok": service.available() and supported_python,
         "model_loaded": service.model_loaded(),
+        "language": TRANSCRIBE_LANGUAGE,
         "python_version": sys.version.split()[0],
         "requires_python": "<3.13",
         "whisperx_available": service.available(),
