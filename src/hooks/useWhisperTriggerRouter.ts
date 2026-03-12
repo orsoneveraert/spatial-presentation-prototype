@@ -56,6 +56,22 @@ type UseWhisperTriggerRouterState = {
   windowTranscript: string
 }
 
+function chunkExtensionForMimeType(mimeType?: string) {
+  if (!mimeType) {
+    return 'webm'
+  }
+
+  if (mimeType.includes('mp4')) {
+    return 'mp4'
+  }
+
+  if (mimeType.includes('ogg')) {
+    return 'ogg'
+  }
+
+  return 'webm'
+}
+
 function isMediaCaptureSupported() {
   return (
     typeof window !== 'undefined' &&
@@ -199,7 +215,7 @@ async function pingService() {
 
 export function useWhisperTriggerRouter({
   armingWords,
-  chunkMs = 4000,
+  chunkMs = 5000,
   nodes,
   onMatch,
   windowMs = 10000,
@@ -209,6 +225,9 @@ export function useWhisperTriggerRouter({
   const processingRef = useRef(false)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const chunkTimerRef = useRef<number | null>(null)
+  const shouldContinueRef = useRef(false)
+  const chunkExtensionRef = useRef('webm')
   const transcriptChunksRef = useRef<TranscriptChunk[]>([])
   const eventsRef = useRef<VoiceEvent[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -227,14 +246,41 @@ export function useWhisperTriggerRouter({
     onMatchRef.current = onMatch
   }, [onMatch])
 
+  const clearChunkTimer = () => {
+    if (chunkTimerRef.current !== null) {
+      window.clearTimeout(chunkTimerRef.current)
+      chunkTimerRef.current = null
+    }
+  }
+
   const stop = () => {
-    recorderRef.current?.stop()
+    shouldContinueRef.current = false
+    clearChunkTimer()
+
+    const recorder = recorderRef.current
     recorderRef.current = null
+
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.stop()
+    }
+
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
     queueRef.current = []
     processingRef.current = false
     setIsListening(false)
+  }
+
+  const enqueueAudioChunk = (audioBlob: Blob) => {
+    queueRef.current.push(audioBlob)
+
+    const maxBufferedChunks = Math.max(2, Math.ceil(windowMs / chunkMs))
+
+    if (queueRef.current.length > maxBufferedChunks) {
+      queueRef.current.splice(0, queueRef.current.length - maxBufferedChunks)
+    }
+
+    void processQueue()
   }
 
   const processQueue = async () => {
@@ -252,7 +298,7 @@ export function useWhisperTriggerRouter({
       }
 
       const formData = new FormData()
-      formData.append('file', audioBlob, 'chunk.webm')
+      formData.append('file', audioBlob, `chunk.${chunkExtensionRef.current}`)
 
       let response: Response
 
@@ -273,12 +319,13 @@ export function useWhisperTriggerRouter({
       }
 
       if (!response.ok) {
-        setError('WhisperX n a pas pu transcrire le dernier extrait audio.')
-        setIsServiceReady(false)
+        setError('Un extrait audio a ete ignore. L ecoute continue.')
+        setIsServiceReady(true)
         continue
       }
 
       setIsServiceReady(true)
+      setError(null)
 
       const payload = (await response.json()) as WhisperTranscriptionResponse
       const normalizedTranscript = normalizePhrase(payload.transcript)
@@ -328,6 +375,50 @@ export function useWhisperTriggerRouter({
     processingRef.current = false
   }
 
+  const startRecorderLoop = (stream: MediaStream, mimeType?: string) => {
+    if (!shouldContinueRef.current) {
+      return
+    }
+
+    const recorder = mimeType
+      ? new MediaRecorder(stream, { mimeType })
+      : new MediaRecorder(stream)
+
+    recorderRef.current = recorder
+
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        enqueueAudioChunk(event.data)
+      }
+    }
+
+    recorder.onerror = () => {
+      setError('La capture audio a rencontre une erreur. L ecoute s arrete.')
+      stop()
+    }
+
+    recorder.onstop = () => {
+      if (recorderRef.current === recorder) {
+        recorderRef.current = null
+      }
+
+      clearChunkTimer()
+
+      if (!shouldContinueRef.current) {
+        return
+      }
+
+      startRecorderLoop(stream, mimeType)
+    }
+
+    recorder.start()
+    chunkTimerRef.current = window.setTimeout(() => {
+      if (recorder.state !== 'inactive') {
+        recorder.stop()
+      }
+    }, chunkMs)
+  }
+
   const start = async () => {
     if (!supported) {
       setError('La capture audio n est pas disponible dans ce navigateur.')
@@ -367,31 +458,14 @@ export function useWhisperTriggerRouter({
         },
       })
       const mimeType = chooseMimeType()
-      const recorder = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream)
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          queueRef.current.push(event.data)
-          void processQueue()
-        }
-      }
-
-      recorder.onstop = () => {
-        stream.getTracks().forEach((track) => track.stop())
-
-        if (streamRef.current === stream) {
-          streamRef.current = null
-        }
-      }
-
-      recorderRef.current = recorder
+      chunkExtensionRef.current = chunkExtensionForMimeType(mimeType)
+      shouldContinueRef.current = true
       streamRef.current = stream
       setError(null)
       setIsListening(true)
-      recorder.start(chunkMs)
+      startRecorderLoop(stream, mimeType)
     } catch {
+      shouldContinueRef.current = false
       setError('L acces au microphone a ete bloque.')
       setIsListening(false)
     }
@@ -414,7 +488,16 @@ export function useWhisperTriggerRouter({
 
     return () => {
       active = false
-      stop()
+      shouldContinueRef.current = false
+      clearChunkTimer()
+      if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+        recorderRef.current.stop()
+      }
+      recorderRef.current = null
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+      queueRef.current = []
+      processingRef.current = false
     }
   }, [])
 

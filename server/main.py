@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import tempfile
@@ -27,6 +28,15 @@ ALLOW_ORIGINS = [
     if origin.strip()
 ]
 ALLOW_CREDENTIALS = "*" not in ALLOW_ORIGINS
+RECOVERABLE_AUDIO_ERRORS = (
+    "invalid data found when processing input",
+    "error opening input",
+    "end of file",
+    "moov atom not found",
+    "could not find codec parameters",
+)
+
+logger = logging.getLogger("spatial-whisperx")
 
 
 class WhisperXService:
@@ -97,6 +107,11 @@ app.add_middleware(
 )
 
 
+def is_recoverable_audio_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(fragment in message for fragment in RECOVERABLE_AUDIO_ERRORS)
+
+
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     supported_python = sys.version_info < (3, 13)
@@ -139,6 +154,13 @@ async def transcribe(file: UploadFile = File(...)) -> dict[str, Any]:
     try:
         result = service.transcribe_file(temp_path)
     except Exception as exc:  # pragma: no cover
+        if is_recoverable_audio_error(exc):
+            logger.warning("Ignoring undecodable audio chunk: %s", exc)
+            return {
+                "language": None,
+                "transcript": "",
+            }
+
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     finally:
         temp_path.unlink(missing_ok=True)
